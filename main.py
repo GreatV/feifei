@@ -18,7 +18,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 from langchain_core.prompts import PromptTemplate
-from langchain.chains import create_retrieval_chain
+from langchain.chains.retrieval import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
 # Load environment variables from a .env file if present
@@ -32,10 +32,11 @@ logging.basicConfig(
 # Lock for thread-safe file operations
 processed_issues_lock = Lock()
 
+
 # Load configuration from YAML file
-def load_config(yaml_file='config.yaml'):
+def load_config(yaml_file="config.yaml"):
     try:
-        with open(yaml_file, 'r') as f:
+        with open(yaml_file, "r") as f:
             config = yaml.safe_load(f)
         logging.info(f"Configuration loaded from {yaml_file}")
     except FileNotFoundError:
@@ -45,6 +46,7 @@ def load_config(yaml_file='config.yaml'):
         logging.error(f"Error parsing YAML file: {e}")
         sys.exit(1)
     return config
+
 
 # Load sensitive information from environment variables
 def load_sensitive_config():
@@ -60,12 +62,8 @@ def load_sensitive_config():
         )
     return sensitive_config
 
-# Global CONFIG dictionary combining YAML config and environment variables
-CONFIG = {}
-CONFIG.update(load_config())
-CONFIG.update(load_sensitive_config())
 
-def initialize_llm(backend="openai", **kwargs):
+def initialize_llm(config, backend="openai", **kwargs):
     """
     Initialize the Language Model (LLM) based on the selected backend.
     """
@@ -74,22 +72,22 @@ def initialize_llm(backend="openai", **kwargs):
 
         llm = ChatOpenAI(
             model=kwargs.get("model_name", "gpt-3.5-turbo"),
-            openai_api_key=CONFIG.get("openai_api_key"),
+            openai_api_key=config.get("openai_api_key"),
             openai_api_base=kwargs.get("openai_api_base"),
         )
     elif backend == "huggingface":
-        from langchain_community.llms import HuggingFaceHub
+        from langchain_huggingface import HuggingFaceHub
 
         llm = HuggingFaceHub(
             repo_id=kwargs.get("repo_id", "gpt2"),
-            huggingfacehub_api_token=CONFIG.get("huggingfacehub_api_token"),
+            huggingfacehub_api_token=config.get("huggingfacehub_api_token"),
             api_base=kwargs.get("huggingface_api_base"),
         )
     elif backend == "local":
-        from langchain_community.llms import HuggingFacePipeline
+        from langchain_huggingface import HuggingFacePipeline
         from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 
-        model_name = kwargs.get("model_name", "your-local-model-name")
+        model_name = kwargs.get("model_name", "Qwen/Qwen2.5-Coder-32B-Instruct")
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         model = AutoModelForCausalLM.from_pretrained(model_name)
 
@@ -97,7 +95,7 @@ def initialize_llm(backend="openai", **kwargs):
             "text-generation",
             model=model,
             tokenizer=tokenizer,
-            max_length=512,
+            max_new_tokens=131072,
             temperature=0.7,
             device=kwargs.get("device", -1),
         )
@@ -108,13 +106,13 @@ def initialize_llm(backend="openai", **kwargs):
     return llm
 
 
-def initialize_embeddings(backend="openai", **kwargs):
+def initialize_embeddings(config, backend="openai", **kwargs):
     """
     Initialize the embeddings model based on the selected backend.
     """
     if backend == "openai":
         embeddings = OpenAIEmbeddings(
-            openai_api_key=CONFIG.get("openai_api_key"),
+            openai_api_key=config.get("openai_api_key"),
             openai_api_base=kwargs.get("openai_api_base"),
         )
     elif backend == "huggingface" or backend == "local":
@@ -157,7 +155,7 @@ def format_document(doc):
     return f"Title: {title}\nLink: {url}\nContent: {doc.page_content}\n"
 
 
-def load_or_build_vectorstore(repo, embeddings, github_token):
+def load_or_build_vectorstore(repo, embeddings, github_token, config):
     """
     Load an existing vector store or build a new one if the repository has new commits.
     """
@@ -319,7 +317,9 @@ def mark_issue_as_processed(repo, issue_number):
             fcntl.flock(f, fcntl.LOCK_UN)
 
 
-def check_and_reply_new_issues(repo, retriever, qa_chain, llm_model_name, start_issue_number):
+def check_and_reply_new_issues(
+    repo, retriever, qa_chain, llm_model_name, start_issue_number
+):
     """
     Check for new issues in a repository and reply to them using the QA chain.
     """
@@ -347,17 +347,13 @@ def check_and_reply_new_issues(repo, retriever, qa_chain, llm_model_name, start_
             try:
                 logging.info(f"Processing Issue #{issue_number} in {repo.full_name}")
                 # Generate answer using qa_chain
-                response = qa_chain.invoke({
-                    "input": question
-                })
+                response = qa_chain.invoke({"input": question})
 
                 # Get the answer from the response
-                answer = response.get('answer', response.get('result', ''))
+                answer = response.get("answer", response.get("result", ""))
 
                 # Append signature to the answer
-                signature = (
-                    "\n\n---\n*Response generated by 🤖 feifei-bot | ChatGPT-4"
-                )
+                signature = "\n\n---\n*Response generated by 🤖 feifei-bot | ChatGPT-4"
                 full_answer = answer.strip() + signature
 
                 logging.info(f"Answer for Issue #{issue_number}: {full_answer}")
@@ -374,18 +370,23 @@ def check_and_reply_new_issues(repo, retriever, qa_chain, llm_model_name, start_
 
 
 def main():
-    github_token = CONFIG.get("github_token")
+    # Load configurations
+    config = load_config()
+    sensitive_config = load_sensitive_config()
+    config.update(sensitive_config)
+
+    github_token = config.get("github_token")
     if not github_token:
         raise ValueError(
             "GitHub token not found. Please set the GITHUB_TOKEN environment variable."
         )
     g = Github(
-        base_url=CONFIG.get("github_base_url", "https://api.github.com"),
+        base_url=config.get("github_base_url", "https://api.github.com"),
         login_or_token=github_token,
     )
 
     # Get the repositories configuration
-    repositories_config = CONFIG.get("repositories", {})
+    repositories_config = config.get("repositories", {})
     if not repositories_config:
         raise ValueError(
             "No repositories specified. Please set 'repositories' in the config.yaml file."
@@ -393,25 +394,27 @@ def main():
 
     # Initialize embeddings
     embeddings = initialize_embeddings(
-        backend=CONFIG.get("embedding_backend"),
-        model_name=CONFIG.get("embedding_model_name"),
-        embedding_model_name=CONFIG.get("embedding_model_name"),
-        openai_api_base=CONFIG.get("openai_api_base"),
-        huggingface_api_base=CONFIG.get("huggingface_api_base"),
+        config,
+        backend=config.get("embedding_backend"),
+        model_name=config.get("embedding_model_name"),
+        embedding_model_name=config.get("embedding_model_name"),
+        openai_api_base=config.get("openai_api_base"),
+        huggingface_api_base=config.get("huggingface_api_base"),
     )
 
     # Initialize LLM
     llm = initialize_llm(
-        backend=CONFIG.get("llm_backend"),
-        model_name=CONFIG.get("model_name"),
-        repo_id=CONFIG.get("repo_id"),
-        device=CONFIG.get("device"),
-        openai_api_base=CONFIG.get("openai_api_base"),
-        huggingface_api_base=CONFIG.get("huggingface_api_base"),
+        config,
+        backend=config.get("llm_backend"),
+        model_name=config.get("model_name"),
+        repo_id=config.get("repo_id"),
+        device=config.get("device"),
+        openai_api_base=config.get("openai_api_base"),
+        huggingface_api_base=config.get("huggingface_api_base"),
     )
 
     # Get the name of the LLM model for the signature
-    llm_model_name = CONFIG.get("model_name")
+    llm_model_name = config.get("model_name")
 
     # Get the prompt template
     PROMPT = get_prompt_template()
@@ -422,13 +425,13 @@ def main():
             try:
                 logging.info("Checking for new issues...")
                 for repo_full_name, repo_settings in repositories_config.items():
-                    start_issue_number = repo_settings.get('start_issue_number', 1)
+                    start_issue_number = repo_settings.get("start_issue_number", 1)
                     repo = g.get_repo(repo_full_name.strip())
                     logging.info(f"Processing repository: {repo_full_name}")
 
                     # Load or build vector store
                     vectorstore = load_or_build_vectorstore(
-                        repo, embeddings, github_token
+                        repo, embeddings, github_token, config
                     )
                     retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
 
@@ -444,13 +447,13 @@ def main():
                     )
 
                 logging.info(
-                    f"Done. Sleeping for {CONFIG.get('check_interval', 300)} seconds."
+                    f"Done. Sleeping for {config.get('check_interval', 300)} seconds."
                 )
             except Exception as e:
                 logging.error(f"An error occurred: {e}")
 
             # Wait for the specified interval before checking again
-            time.sleep(CONFIG.get("check_interval", 300))
+            time.sleep(config.get("check_interval", 300))
     except KeyboardInterrupt:
         logging.info("Program terminated by user.")
         sys.exit(0)
