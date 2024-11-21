@@ -1,0 +1,11 @@
+langchain
+langchain_openai
+langchain_huggingface
+langchain-community
+openai
+PyGithub
+requests
+faiss-cpu  # For CPU; use faiss-gpu if using GPU
+transformers
+torch
+python-dotenv
