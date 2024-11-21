@@ -1,7 +1,6 @@
 import os
 import sys
 import time
-import requests
 import json
 import logging
 import mimetypes
@@ -12,8 +11,8 @@ from threading import Lock
 import shutil
 import fcntl
 from dotenv import load_dotenv
+import yaml
 
-# Import your specific langchain modules (assuming they are correctly installed)
 from langchain_openai import OpenAIEmbeddings
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
@@ -33,26 +32,38 @@ logging.basicConfig(
 # Lock for thread-safe file operations
 processed_issues_lock = Lock()
 
-# Configuration dictionary to manage LLM and embedding backends
-CONFIG = {
-    "llm_backend": os.getenv("LLM_BACKEND", "openai"),
-    "embedding_backend": os.getenv("EMBEDDING_BACKEND", "openai"),
-    "model_name": os.getenv("MODEL_NAME", "gpt-3.5-turbo"),
-    "embedding_model_name": os.getenv(
-        "EMBEDDING_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2"
-    ),
-    "repo_id": os.getenv("HUGGINGFACE_REPO_ID", "gpt2"),
-    "github_token": os.getenv("GITHUB_TOKEN"),
-    "openai_api_key": os.getenv("OPENAI_API_KEY"),
-    "huggingfacehub_api_token": os.getenv("HUGGINGFACEHUB_API_TOKEN"),
-    "repositories": os.getenv("REPOSITORIES", "owner/repository_name").split(","),
-    "check_interval": int(os.getenv("CHECK_INTERVAL", 300)),
-    "device": int(os.getenv("DEVICE", -1)),
-    "github_base_url": os.getenv("GITHUB_BASE_URL", "https://api.github.com"),
-    "openai_api_base": os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1"),
-    "huggingface_api_base": os.getenv("HUGGINGFACE_API_BASE", None),
-}
+# Load configuration from YAML file
+def load_config(yaml_file='config.yaml'):
+    try:
+        with open(yaml_file, 'r') as f:
+            config = yaml.safe_load(f)
+        logging.info(f"Configuration loaded from {yaml_file}")
+    except FileNotFoundError:
+        logging.error(f"Configuration file {yaml_file} not found.")
+        sys.exit(1)
+    except yaml.YAMLError as e:
+        logging.error(f"Error parsing YAML file: {e}")
+        sys.exit(1)
+    return config
 
+# Load sensitive information from environment variables
+def load_sensitive_config():
+    sensitive_config = {
+        "github_token": os.getenv("GITHUB_TOKEN"),
+        "openai_api_key": os.getenv("OPENAI_API_KEY"),
+        "huggingfacehub_api_token": os.getenv("HUGGINGFACEHUB_API_TOKEN"),
+    }
+    missing_keys = [k for k, v in sensitive_config.items() if not v]
+    if missing_keys:
+        logging.warning(
+            f"Missing environment variables for sensitive config: {', '.join(missing_keys)}"
+        )
+    return sensitive_config
+
+# Global CONFIG dictionary combining YAML config and environment variables
+CONFIG = {}
+CONFIG.update(load_config())
+CONFIG.update(load_sensitive_config())
 
 def initialize_llm(backend="openai", **kwargs):
     """
@@ -63,13 +74,15 @@ def initialize_llm(backend="openai", **kwargs):
 
         llm = ChatOpenAI(
             model=kwargs.get("model_name", "gpt-3.5-turbo"),
+            openai_api_key=CONFIG.get("openai_api_key"),
+            openai_api_base=kwargs.get("openai_api_base"),
         )
     elif backend == "huggingface":
         from langchain_community.llms import HuggingFaceHub
 
         llm = HuggingFaceHub(
             repo_id=kwargs.get("repo_id", "gpt2"),
-            huggingfacehub_api_token=kwargs.get("huggingfacehub_api_token"),
+            huggingfacehub_api_token=CONFIG.get("huggingfacehub_api_token"),
             api_base=kwargs.get("huggingface_api_base"),
         )
     elif backend == "local":
@@ -100,9 +113,14 @@ def initialize_embeddings(backend="openai", **kwargs):
     Initialize the embeddings model based on the selected backend.
     """
     if backend == "openai":
-        embeddings = OpenAIEmbeddings()
+        embeddings = OpenAIEmbeddings(
+            openai_api_key=CONFIG.get("openai_api_key"),
+            openai_api_base=kwargs.get("openai_api_base"),
+        )
     elif backend == "huggingface" or backend == "local":
-        model_name = kwargs.get("model_name", "sentence-transformers/all-MiniLM-L6-v2")
+        model_name = kwargs.get(
+            "embedding_model_name", "sentence-transformers/all-MiniLM-L6-v2"
+        )
         embeddings = HuggingFaceEmbeddings(model_name=model_name)
     else:
         raise ValueError(f"Unsupported embedding backend: {backend}")
@@ -162,7 +180,11 @@ def load_or_build_vectorstore(repo, embeddings, github_token):
             if repo_state.get("latest_commit_sha") == latest_commit_sha:
                 try:
                     # Attempt to load the FAISS index
-                    vectorstore = FAISS.load_local(VECTORSTORE_PATH, embeddings, allow_dangerous_deserialization=True)
+                    vectorstore = FAISS.load_local(
+                        VECTORSTORE_PATH,
+                        embeddings,
+                        allow_dangerous_deserialization=True,
+                    )
                     logging.info(f"Loaded existing vector store for {repo.full_name}")
                     return vectorstore
                 except Exception as e:
@@ -220,10 +242,9 @@ def fetch_file_content(file_path):
 
 def fetch_documents_from_repo(repo, github_token):
     """
-    Fetch documents from a GitHub repository, including source code, issues, and discussions.
+    Fetch documents from a GitHub repository, including source code.
     """
     documents = []
-    headers = {"Authorization": f"token {github_token}"}
     repo_dir = f"/tmp/{repo.full_name.replace('/', '_')}"
 
     try:
@@ -263,81 +284,6 @@ def fetch_documents_from_repo(repo, github_token):
         # Clean up the temporary directory
         shutil.rmtree(repo_dir)
 
-    # # Fetch all issues using the PyGithub library
-    # try:
-    #     issues = repo.get_issues(state="all")
-    #     issue_count = 0
-    #     for issue in issues:
-    #         documents.append(
-    #             Document(
-    #                 page_content=issue.body or "",
-    #                 metadata={
-    #                     "source": f"Issue #{issue.number}",
-    #                     "title": issue.title,
-    #                     "url": issue.html_url,
-    #                 },
-    #             )
-    #         )
-    #         issue_count += 1
-    #     logging.info(f"Fetched {issue_count} issues from {repo.full_name}")
-    # except Exception as e:
-    #     logging.error(f"Error fetching issues from {repo.full_name}: {e}")
-
-    # try:
-    #     owner, repo_name = repo.full_name.split("/")
-    #     discussions_url = (
-    #         f"https://api.github.com/repos/{owner}/{repo_name}/discussions"
-    #     )
-    #     page = 1
-    #     per_page = 30
-    #     discussion_count = 0
-
-    #     while True:
-    #         response = requests.get(
-    #             discussions_url,
-    #             headers=headers,
-    #             params={"per_page": per_page, "page": page},
-    #         )
-
-    #         if response.status_code == 429:
-    #             # Rate limit exceeded, wait and retry
-    #             reset_time = int(
-    #                 response.headers.get("X-RateLimit-Reset", time.time() + 60)
-    #             )
-    #             sleep_time = max(reset_time - time.time(), 60)
-    #             logging.warning(
-    #                 f"Rate limit exceeded. Sleeping for {sleep_time} seconds."
-    #             )
-    #             time.sleep(sleep_time)
-    #             continue
-    #         if response.status_code != 200:
-    #             break
-
-    #         page_data = response.json()
-    #         if not page_data:
-    #             break
-
-    #         for discussion in page_data:
-    #             page_content = discussion.get("body") or ""
-    #             title = discussion.get("title") or "Untitled"
-    #             url = discussion.get("html_url") or ""
-    #             documents.append(
-    #                 Document(
-    #                     page_content=page_content,
-    #                     metadata={
-    #                         "source": f"Discussion #{discussion.get('number')}",
-    #                         "title": title,
-    #                         "url": url,
-    #                     },
-    #                 )
-    #             )
-    #             discussion_count += 1
-    #         page += 1
-
-    #     logging.info(f"Fetched {discussion_count} discussions from {repo.full_name}")
-    # except Exception as e:
-    #     logging.error(f"Error fetching discussions from {repo.full_name}: {e}")
-
     return documents
 
 
@@ -373,7 +319,7 @@ def mark_issue_as_processed(repo, issue_number):
             fcntl.flock(f, fcntl.LOCK_UN)
 
 
-def check_and_reply_new_issues(repo, retriever, qa_chain, llm_model_name):
+def check_and_reply_new_issues(repo, retriever, qa_chain, llm_model_name, start_issue_number):
     """
     Check for new issues in a repository and reply to them using the QA chain.
     """
@@ -384,6 +330,10 @@ def check_and_reply_new_issues(repo, retriever, qa_chain, llm_model_name):
 
     for issue in open_issues:
         issue_number = issue.number
+
+        # Skip issues with numbers less than start_issue_number
+        if issue_number < start_issue_number:
+            continue
 
         if issue_number not in processed_issues:
             # Include both the title and body in the question
@@ -397,12 +347,12 @@ def check_and_reply_new_issues(repo, retriever, qa_chain, llm_model_name):
             try:
                 logging.info(f"Processing Issue #{issue_number} in {repo.full_name}")
                 # Generate answer using qa_chain
-                response = qa_chain.invoke({  
-                    "input": question  
-                })  
-                
-                # Get the answer from the response  
-                answer = response.get('answer', response.get('result', '')) 
+                response = qa_chain.invoke({
+                    "input": question
+                })
+
+                # Get the answer from the response
+                answer = response.get('answer', response.get('result', ''))
 
                 # Append signature to the answer
                 signature = (
@@ -434,19 +384,18 @@ def main():
         login_or_token=github_token,
     )
 
-    # List of repositories to monitor
-    repositories = CONFIG.get("repositories", [])
-    if not repositories:
+    # Get the repositories configuration
+    repositories_config = CONFIG.get("repositories", {})
+    if not repositories_config:
         raise ValueError(
-            "No repositories specified. Please set the REPOSITORIES environment variable."
+            "No repositories specified. Please set 'repositories' in the config.yaml file."
         )
 
     # Initialize embeddings
     embeddings = initialize_embeddings(
         backend=CONFIG.get("embedding_backend"),
-        openai_api_key=CONFIG.get("openai_api_key"),
         model_name=CONFIG.get("embedding_model_name"),
-        huggingfacehub_api_token=CONFIG.get("huggingfacehub_api_token"),
+        embedding_model_name=CONFIG.get("embedding_model_name"),
         openai_api_base=CONFIG.get("openai_api_base"),
         huggingface_api_base=CONFIG.get("huggingface_api_base"),
     )
@@ -454,8 +403,6 @@ def main():
     # Initialize LLM
     llm = initialize_llm(
         backend=CONFIG.get("llm_backend"),
-        openai_api_key=CONFIG.get("openai_api_key"),
-        huggingfacehub_api_token=CONFIG.get("huggingfacehub_api_token"),
         model_name=CONFIG.get("model_name"),
         repo_id=CONFIG.get("repo_id"),
         device=CONFIG.get("device"),
@@ -474,7 +421,8 @@ def main():
         while True:
             try:
                 logging.info("Checking for new issues...")
-                for repo_full_name in repositories:
+                for repo_full_name, repo_settings in repositories_config.items():
+                    start_issue_number = repo_settings.get('start_issue_number', 1)
                     repo = g.get_repo(repo_full_name.strip())
                     logging.info(f"Processing repository: {repo_full_name}")
 
@@ -492,7 +440,7 @@ def main():
 
                     # Check and reply to new issues
                     check_and_reply_new_issues(
-                        repo, retriever, qa_chain, llm_model_name
+                        repo, retriever, qa_chain, llm_model_name, start_issue_number
                     )
 
                 logging.info(

@@ -1,0 +1,16 @@
+llm_backend: openai
+embedding_backend: openai
+model_name: gpt-3.5-turbo
+embedding_model_name: sentence-transformers/all-MiniLM-L6-v2
+repo_id: gpt2
+repositories:
+  owner/repo1:
+    start_issue_number: 100
+  owner/repo2:
+    start_issue_number: 200
+
+check_interval: 300
+device: -1
+github_base_url: https://api.github.com
+openai_api_base: https://api.openai.com/v1
+huggingface_api_base: null
