@@ -13,8 +13,6 @@ import fcntl
 from dotenv import load_dotenv
 import yaml
 
-from langchain_openai import OpenAIEmbeddings
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 from langchain_core.prompts import PromptTemplate
@@ -48,22 +46,7 @@ def load_config(yaml_file="config.yaml"):
     return config
 
 
-# Load sensitive information from environment variables
-def load_sensitive_config():
-    sensitive_config = {
-        "github_token": os.getenv("GITHUB_TOKEN"),
-        "openai_api_key": os.getenv("OPENAI_API_KEY"),
-        "huggingfacehub_api_token": os.getenv("HUGGINGFACEHUB_API_TOKEN"),
-    }
-    missing_keys = [k for k, v in sensitive_config.items() if not v]
-    if missing_keys:
-        logging.warning(
-            f"Missing environment variables for sensitive config: {', '.join(missing_keys)}"
-        )
-    return sensitive_config
-
-
-def initialize_llm(config, backend="openai", **kwargs):
+def initialize_llm(backend="openai", **kwargs):
     """
     Initialize the Language Model (LLM) based on the selected backend.
     """
@@ -72,22 +55,52 @@ def initialize_llm(config, backend="openai", **kwargs):
 
         llm = ChatOpenAI(
             model=kwargs.get("model_name", "gpt-3.5-turbo"),
-            openai_api_key=config.get("openai_api_key"),
             openai_api_base=kwargs.get("openai_api_base"),
         )
-    elif backend == "huggingface":
-        from langchain_huggingface import HuggingFaceHub
+    elif backend == "anthropic":
+        from langchain_anthropic import ChatAnthropic
 
-        llm = HuggingFaceHub(
+        llm = ChatAnthropic(
+            model_name=kwargs.get("model_name", "claude-v1"),
+            max_tokens_to_sample=kwargs.get("max_tokens_to_sample", 1024),
+        )
+    elif backend == "google":
+        from langchain_google_vertexai import ChatVertexAI
+
+        llm = ChatVertexAI(
+            model_name=kwargs.get("model_name", "chat-bison"),
+            temperature=kwargs.get("temperature", 0.7),
+            max_output_tokens=kwargs.get("max_output_tokens", 1024),
+        )
+    elif backend == "qianfan":
+        from langchain_community.chat_models import QianfanChatEndpoint
+
+        llm = QianfanChatEndpoint(
+            model=kwargs.get("model_name", "ERNIE-3.5-8K"),
+            temperature=kwargs.get("temperature", 0.7),
+        )
+    elif backend == "ollama":
+        from langchain_ollama.chat_models import ChatOllama
+
+        llm = ChatOllama(
+            base_url=kwargs.get("ollama_base_url", "http://localhost:11434"),
+            model=kwargs.get("model_name", "llama2"),
+        )
+    elif backend == "huggingface":
+        from langchain_huggingface import HuggingFaceEndpoint
+
+        llm = HuggingFaceEndpoint(
             repo_id=kwargs.get("repo_id", "gpt2"),
-            huggingfacehub_api_token=config.get("huggingfacehub_api_token"),
-            api_base=kwargs.get("huggingface_api_base"),
+            model_kwargs={
+                "temperature": kwargs.get("temperature", 0.7),
+                "max_new_tokens": kwargs.get("max_new_tokens", 512),
+            },
         )
     elif backend == "local":
         from langchain_huggingface import HuggingFacePipeline
         from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 
-        model_name = kwargs.get("model_name", "Qwen/Qwen2.5-Coder-32B-Instruct")
+        model_name = kwargs.get("model_name", "gpt2")
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         model = AutoModelForCausalLM.from_pretrained(model_name)
 
@@ -95,8 +108,8 @@ def initialize_llm(config, backend="openai", **kwargs):
             "text-generation",
             model=model,
             tokenizer=tokenizer,
-            max_new_tokens=131072,
-            temperature=0.7,
+            max_new_tokens=kwargs.get("max_new_tokens", 512),
+            temperature=kwargs.get("temperature", 0.7),
             device=kwargs.get("device", -1),
         )
 
@@ -106,16 +119,24 @@ def initialize_llm(config, backend="openai", **kwargs):
     return llm
 
 
-def initialize_embeddings(config, backend="openai", **kwargs):
+def initialize_embeddings(backend="openai", **kwargs):
     """
     Initialize the embeddings model based on the selected backend.
     """
     if backend == "openai":
+        from langchain_openai import OpenAIEmbeddings
+
         embeddings = OpenAIEmbeddings(
-            openai_api_key=config.get("openai_api_key"),
+            model=kwargs.get("model_name"),
             openai_api_base=kwargs.get("openai_api_base"),
         )
+    elif backend == "qianfan":
+        from langchain_community.embeddings import QianfanEmbeddingsEndpoint
+
+        embeddings = QianfanEmbeddingsEndpoint()
     elif backend == "huggingface" or backend == "local":
+        from langchain_huggingface import HuggingFaceEmbeddings
+
         model_name = kwargs.get(
             "embedding_model_name", "sentence-transformers/all-MiniLM-L6-v2"
         )
@@ -353,7 +374,9 @@ def check_and_reply_new_issues(
                 answer = response.get("answer", response.get("result", ""))
 
                 # Append signature to the answer
-                signature = "\n\n---\n*Response generated by 🤖 feifei-bot | ChatGPT-4"
+                signature = (
+                    f"\n\n---\n*Response generated by 🤖 feifei-bot | {llm_model_name}*"
+                )
                 full_answer = answer.strip() + signature
 
                 logging.info(f"Answer for Issue #{issue_number}: {full_answer}")
@@ -372,10 +395,8 @@ def check_and_reply_new_issues(
 def main():
     # Load configurations
     config = load_config()
-    sensitive_config = load_sensitive_config()
-    config.update(sensitive_config)
 
-    github_token = config.get("github_token")
+    github_token = os.getenv("GITHUB_TOKEN", None)
     if not github_token:
         raise ValueError(
             "GitHub token not found. Please set the GITHUB_TOKEN environment variable."
@@ -394,7 +415,6 @@ def main():
 
     # Initialize embeddings
     embeddings = initialize_embeddings(
-        config,
         backend=config.get("embedding_backend"),
         model_name=config.get("embedding_model_name"),
         embedding_model_name=config.get("embedding_model_name"),
@@ -404,7 +424,6 @@ def main():
 
     # Initialize LLM
     llm = initialize_llm(
-        config,
         backend=config.get("llm_backend"),
         model_name=config.get("model_name"),
         repo_id=config.get("repo_id"),

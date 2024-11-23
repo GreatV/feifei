@@ -2,12 +2,12 @@
 
 [English](README.md) | [中文](README_CN.md)
 
-This repository contains a Python script that automates responses to new issues in specified GitHub repositories using a Language Model (LLM). The bot leverages OpenAI's GPT models or Hugging Face models to generate responses based on the repository's content.
+This repository contains a Python script that automates responses to new issues in specified GitHub repositories using a Language Model (LLM). The bot leverages OpenAI's GPT models, Hugging Face models, or other supported models to generate responses based on the repository's content.
 
 ## Features
 
 - **Automated Responses**: Monitors specified GitHub repositories for new issues and automatically generates responses using an LLM.
-- **LLM Integration**: Supports OpenAI, Hugging Face, or local models for generating responses.
+- **LLM Integration**: Supports OpenAI, Hugging Face, Anthropic, Google, Qianfan, Ollama, or local models for generating responses.
 - **Vector Stores**: Builds or loads a vector store of the repository's content for context-aware responses.
 - **Environment Configuration**: Utilizes environment variables and a YAML configuration file for flexible setup.
 - **Thread-Safe Operations**: Implements locking mechanisms to ensure thread-safe file operations.
@@ -26,7 +26,7 @@ This repository contains a Python script that automates responses to new issues 
 ## Prerequisites
 
 - Python 3.10 or higher
-- Access tokens for GitHub, OpenAI, and/or Hugging Face (depending on the chosen backend)
+- Access tokens for GitHub, OpenAI, Hugging Face, or other supported backends
 
 ## Installation
 

@@ -2,12 +2,12 @@
 
 [English](README.md) | [中文](README_CN.md)
 
-该仓库包含一个Python脚本，使用语言模型（LLM）自动回复指定GitHub仓库中的新Issue。该机器人利用OpenAI的GPT模型或Hugging Face模型，根据仓库内容生成回复。
+该仓库包含一个Python脚本，使用语言模型（LLM）自动回复指定GitHub仓库中的新Issue。该机器人利用OpenAI的GPT模型、Hugging Face模型或其他支持的模型，根据仓库内容生成回复。
 
 #### 特性
 
 - **自动回复**：监控指定的GitHub仓库中的新Issue，并使用LLM自动生成回复。
-- **LLM集成**：支持OpenAI、Hugging Face或本地模型来生成回复。
+- **LLM集成**：支持OpenAI、Hugging Face、Anthropic、Google、Qianfan、Ollama或本地模��来生成回复。
 - **向量存储**：构建或加载仓库内容的向量存储，实现基于上下文的回复。
 - **环境配置**：使用环境变量和YAML配置文件，灵活设置。
 - **线程安全操作**：实现锁机制，确保文件操作的线程安全。
@@ -26,7 +26,7 @@
 #### 先决条件
 
 - Python 3.10或更高版本
-- GitHub、OpenAI和/或Hugging Face的访问令牌（取决于选择的后端）
+- GitHub、OpenAI、Hugging Face或其他支持的后端的访问令牌
 
 #### 安装
 

@@ -1,6 +1,9 @@
 langchain
 langchain_openai
 langchain_huggingface
+langchain-anthropic
+langchain-google-vertexai
+langchain-ollama
 langchain-community
 openai
 PyGithub
@@ -9,3 +12,5 @@ faiss-cpu  # For CPU; use faiss-gpu if using GPU
 transformers
 torch
 python-dotenv
+GitPython
+PyYAML
