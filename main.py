@@ -11,6 +11,7 @@ import shutil
 import portalocker
 from dotenv import load_dotenv
 import yaml
+import argparse
 
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
@@ -331,7 +332,7 @@ def mark_issue_as_processed(repo, issue_number):
 
 
 def check_and_reply_new_issues(
-    repo, retriever, qa_chain, llm_model_name, start_issue_number
+    repo, retriever, qa_chain, llm_model_name, start_issue_number, debug
 ):
     """
     Check for new issues in a repository and reply to them using the QA chain.
@@ -372,12 +373,20 @@ def check_and_reply_new_issues(
                 full_answer = answer.strip() + signature
 
                 logging.info(f"Answer for Issue #{issue_number}: {full_answer}")
-                # Post a comment to the issue
-                # issue.create_comment(full_answer)
+
+                if not debug:
+                    # Post a comment to the issue
+                    issue.create_comment(full_answer)
+                    logging.info(
+                        f"Replied to Issue #{issue_number} in {repo.full_name}"
+                    )
+                else:
+                    logging.info(
+                        f"Debug mode: Would have commented on Issue #{issue_number}"
+                    )
 
                 # Mark issue as processed
                 mark_issue_as_processed(repo, issue_number)
-                logging.info(f"Replied to Issue #{issue_number} in {repo.full_name}")
             except Exception as e:
                 logging.error(
                     f"Error processing Issue #{issue_number} in {repo.full_name}: {e}"
@@ -385,6 +394,15 @@ def check_and_reply_new_issues(
 
 
 def main():
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description="Process GitHub issues.")
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Only output logs, do not actually comment on issues.",
+    )
+    args = parser.parse_args()
+
     # Load configurations
     config = load_config()
 
@@ -454,7 +472,12 @@ def main():
 
                     # Check and reply to new issues
                     check_and_reply_new_issues(
-                        repo, retriever, qa_chain, llm_model_name, start_issue_number
+                        repo,
+                        retriever,
+                        qa_chain,
+                        llm_model_name,
+                        start_issue_number,
+                        args.debug,
                     )
 
                 logging.info(
