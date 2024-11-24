@@ -14,3 +14,4 @@ torch
 python-dotenv
 GitPython
 PyYAML
+portalocker

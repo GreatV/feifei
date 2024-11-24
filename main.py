@@ -7,9 +7,8 @@ import mimetypes
 import concurrent.futures
 from github import Github
 from git import Repo
-from threading import Lock
 import shutil
-import fcntl
+import portalocker
 from dotenv import load_dotenv
 import yaml
 
@@ -26,9 +25,6 @@ load_dotenv()
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
-
-# Lock for thread-safe file operations
-processed_issues_lock = Lock()
 
 
 # Load configuration from YAML file
@@ -311,16 +307,13 @@ def get_processed_issues(repo):
     Get the set of processed issue numbers from a file specific to the repository.
     """
     PROCESSED_ISSUES_FILE = f"{repo.full_name.replace('/', '_')}_processed_issues.txt"
-    with processed_issues_lock:
-        if not os.path.exists(PROCESSED_ISSUES_FILE):
-            with open(PROCESSED_ISSUES_FILE, "w") as f:
-                pass
-        with open(PROCESSED_ISSUES_FILE, "r") as f:
-            # Acquire shared lock
-            fcntl.flock(f, fcntl.LOCK_SH)
-            processed = f.read().splitlines()
-            # Release lock
-            fcntl.flock(f, fcntl.LOCK_UN)
+    if not os.path.exists(PROCESSED_ISSUES_FILE):
+        with open(PROCESSED_ISSUES_FILE, "w") as f:
+            pass
+    with open(PROCESSED_ISSUES_FILE, "r") as f:
+        portalocker.lock(f, portalocker.LOCK_SH)
+        processed = f.read().splitlines()
+        portalocker.unlock(f)
     return set(int(i) for i in processed if i.strip())
 
 
@@ -329,13 +322,12 @@ def mark_issue_as_processed(repo, issue_number):
     Mark an issue as processed by adding it to the repository-specific file.
     """
     PROCESSED_ISSUES_FILE = f"{repo.full_name.replace('/', '_')}_processed_issues.txt"
-    with processed_issues_lock:
-        with open(PROCESSED_ISSUES_FILE, "a") as f:
-            # Acquire exclusive lock
-            fcntl.flock(f, fcntl.LOCK_EX)
-            f.write(f"{issue_number}\n")
-            # Release lock
-            fcntl.flock(f, fcntl.LOCK_UN)
+    with open(PROCESSED_ISSUES_FILE, "a") as f:
+        # Acquire exclusive lock
+        portalocker.lock(f, portalocker.LOCK_EX)
+        f.write(f"{issue_number}\n")
+        # Release lock
+        portalocker.unlock(f)
 
 
 def check_and_reply_new_issues(
@@ -466,13 +458,13 @@ def main():
                     )
 
                 logging.info(
-                    f"Done. Sleeping for {config.get('check_interval', 300)} seconds."
+                    f"Done. Sleeping for {config.get('check_interval', 600)} seconds."
                 )
             except Exception as e:
                 logging.error(f"An error occurred: {e}")
 
             # Wait for the specified interval before checking again
-            time.sleep(config.get("check_interval", 300))
+            time.sleep(config.get("check_interval", 600))
     except KeyboardInterrupt:
         logging.info("Program terminated by user.")
         sys.exit(0)
