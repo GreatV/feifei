@@ -11,6 +11,7 @@ import portalocker
 from dotenv import load_dotenv
 import yaml
 import argparse
+from ratelimit import limits, sleep_and_retry
 
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
@@ -30,6 +31,28 @@ logging.basicConfig(
     handlers=[logging.FileHandler("feifei-bot.log"), logging.StreamHandler()],
 )
 
+# Define rate limits (e.g., 5000 requests per hour for GitHub)
+GITHUB_RATE_LIMIT = 5000
+GITHUB_RATE_PERIOD = 3600  # 1 hour
+
+# Define rate limits for OpenAI API if applicable
+OPENAI_RATE_LIMIT = 60
+OPENAI_RATE_PERIOD = 60  # 1 minute
+
+
+# Decorator to handle GitHub API rate limiting
+@sleep_and_retry
+@limits(calls=GITHUB_RATE_LIMIT, period=GITHUB_RATE_PERIOD)
+def github_api_request(func, *args, **kwargs):
+    return func(*args, **kwargs)
+
+
+# Decorator to handle OpenAI API rate limiting
+@sleep_and_retry
+@limits(calls=OPENAI_RATE_LIMIT, period=OPENAI_RATE_PERIOD)
+def openai_api_request(func, *args, **kwargs):
+    return func(*args, **kwargs)
+
 
 # Load configuration from YAML file
 def load_config(yaml_file="config.yaml"):
@@ -44,6 +67,23 @@ def load_config(yaml_file="config.yaml"):
         logging.error(f"Error parsing YAML file: {e}")
         sys.exit(1)
     return config
+
+
+def validate_config(config):
+    required_keys = [
+        "github_base_url",
+        "repositories",
+        "embedding_backend",
+        "llm_backend",
+        "model_name",
+        "signature",
+        "prompt_template",
+    ]
+    for key in required_keys:
+        if key not in config:
+            logging.error(f"Missing required configuration key: {key}")
+            sys.exit(1)
+    logging.info("Configuration validation passed.")
 
 
 def initialize_llm(backend="openai", **kwargs):
@@ -165,12 +205,12 @@ def format_document(doc):
 
 
 def rebuild_vectorstore(
-    repo, embeddings, github_token, VECTORSTORE_PATH, REPO_STATE_PATH
+    repo, embeddings, github_token, VECTORSTORE_PATH, REPO_STATE_PATH, branch="main"
 ):
     """
     Rebuild the vector store and update the repository state.
     """
-    documents = fetch_documents_from_repo(repo, github_token)
+    documents = fetch_documents_from_repo(repo, github_token, branch)
     vectorstore = FAISS.from_documents(documents, embeddings)
     vectorstore.save_local(VECTORSTORE_PATH)
 
@@ -184,7 +224,7 @@ def rebuild_vectorstore(
     return vectorstore
 
 
-def load_or_build_vectorstore(repo, embeddings, github_token, config):
+def load_or_build_vectorstore(repo, embeddings, github_token, config, branch="main"):
     """
     Load an existing vector store or build a new one if the repository has new commits.
     """
@@ -220,14 +260,14 @@ def load_or_build_vectorstore(repo, embeddings, github_token, config):
         # If the vector store is missing, empty, or fails to load, rebuild it
         logging.info(f"Building a new vector store for {repo.full_name}")
         return rebuild_vectorstore(
-            repo, embeddings, github_token, VECTORSTORE_PATH, REPO_STATE_PATH
+            repo, embeddings, github_token, VECTORSTORE_PATH, REPO_STATE_PATH, branch
         )
 
     except Exception as e:
         logging.error(f"Error in load_or_build_vectorstore: {e}")
         # Rebuild the vector store as a last resort and update commit SHA
         return rebuild_vectorstore(
-            repo, embeddings, github_token, VECTORSTORE_PATH, REPO_STATE_PATH
+            repo, embeddings, github_token, VECTORSTORE_PATH, REPO_STATE_PATH, branch
         )
 
 
@@ -239,7 +279,7 @@ def is_binary_file(filepath):
     return False
 
 
-def fetch_file_content(file_path):
+def fetch_file_content(file_path, repo_url, branch):
     if is_binary_file(file_path):
         logging.info(f"Skipping binary file {file_path}")
         return None
@@ -250,24 +290,31 @@ def fetch_file_content(file_path):
         return {
             "path": file_path,
             "content": content,
+            "url": f"{repo_url}/blob/{branch}/{os.path.relpath(file_path, start=os.path.dirname(repo_url))}",
         }
     except Exception as e:
         logging.warning(f"Error reading file {file_path}: {e}")
     return None
 
 
-def fetch_documents_from_repo(repo, github_token):
+def fetch_documents_from_repo(repo, github_token, branch=None):
     """
     Fetch documents from a GitHub repository, including source code.
     """
     documents = []
     repo_dir = f"/tmp/{repo.full_name.replace('/', '_')}"
+    repo_url = repo.html_url
+
+    # Use the branch specified in config.yaml or the default branch from GitHub API
+    if branch is None:
+        branch = repo.default_branch
 
     try:
         if os.path.exists(repo_dir):
-            Repo(repo_dir).remote().pull()
+            github_api_request(Repo(repo_dir).remote().pull)
+            github_api_request(Repo(repo_dir).git.checkout, branch)
         else:
-            Repo.clone_from(repo.clone_url, repo_dir)
+            github_api_request(Repo.clone_from, repo.clone_url, repo_dir, branch=branch)
 
         source_files = []
         for root, _, files in os.walk(repo_dir):
@@ -279,14 +326,19 @@ def fetch_documents_from_repo(repo, github_token):
 
         source_code_count = 0
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            results = list(executor.map(fetch_file_content, source_files))
+            results = list(
+                executor.map(
+                    lambda file_path: fetch_file_content(file_path, repo_url, branch),
+                    source_files,
+                )
+            )
 
         for result in results:
             if result:
                 documents.append(
                     Document(
                         page_content=result["content"],
-                        metadata={"source": result["path"]},
+                        metadata={"source": result["path"], "url": result["url"]},
                     )
                 )
                 source_code_count += 1
@@ -339,6 +391,8 @@ def check_and_reply_new_issues(
     start_issue_number,
     debug,
     signature_template,
+    max_retries=3,
+    retry_interval=60,
 ):
     """
     Check for new issues in a repository and reply to them using the QA chain.
@@ -346,7 +400,7 @@ def check_and_reply_new_issues(
     processed_issues = get_processed_issues(repo)
 
     # Get open issues
-    open_issues = repo.get_issues(state="open")
+    open_issues = github_api_request(repo.get_issues, state="open")
 
     for issue in open_issues:
         issue_number = issue.number
@@ -360,41 +414,56 @@ def check_and_reply_new_issues(
             question = f"{issue.title}\n\n{issue.body or ''}"
 
             if not question.strip():
-                # Skip if the issue body is empty
+                # Log and skip if both the issue title and body are empty
+                logging.info(
+                    f"Skipping Issue #{issue_number} in {repo.full_name} because it has no content."
+                )
                 mark_issue_as_processed(repo, issue_number)
                 continue
 
-            try:
-                logging.info(f"Processing Issue #{issue_number} in {repo.full_name}")
-                # Generate answer using qa_chain
-                response = qa_chain.invoke({"input": question})
-
-                # Get the answer from the response
-                answer = response.get("answer", response.get("result", ""))
-
-                # Append signature to the answer
-                signature = signature_template.format(model_name=llm_model_name)
-                full_answer = answer.strip() + signature
-
-                logging.info(f"Answer for Issue #{issue_number}: {full_answer}")
-
-                if not debug:
-                    # Post a comment to the issue
-                    issue.create_comment(full_answer)
+            retries = 0
+            while retries < max_retries:
+                try:
                     logging.info(
-                        f"Replied to Issue #{issue_number} in {repo.full_name}"
+                        f"Processing Issue #{issue_number} in {repo.full_name}"
                     )
-                else:
-                    logging.info(
-                        f"Debug mode: Would have commented on Issue #{issue_number}"
-                    )
+                    # Generate answer using qa_chain
+                    response = openai_api_request(qa_chain.invoke, {"input": question})
 
-                # Mark issue as processed
-                mark_issue_as_processed(repo, issue_number)
-            except Exception as e:
-                logging.error(
-                    f"Error processing Issue #{issue_number} in {repo.full_name}: {e}"
-                )
+                    # Get the answer from the response
+                    answer = response.get("answer", response.get("result", ""))
+
+                    # Append signature to the answer
+                    signature = signature_template.format(model_name=llm_model_name)
+                    full_answer = answer.strip() + signature
+
+                    logging.info(f"Answer for Issue #{issue_number}: {full_answer}")
+
+                    if not debug:
+                        # Post a comment to the issue
+                        issue.create_comment(full_answer)
+                        logging.info(
+                            f"Replied to Issue #{issue_number} in {repo.full_name}"
+                        )
+                    else:
+                        logging.info(
+                            f"Debug mode: Would have commented on Issue #{issue_number}"
+                        )
+
+                    # Mark issue as processed
+                    mark_issue_as_processed(repo, issue_number)
+                    break
+                except Exception as e:
+                    retries += 1
+                    logging.error(
+                        f"Error processing Issue #{issue_number} in {repo.full_name}: {e}. Retry {retries}/{max_retries}"
+                    )
+                    if retries == max_retries:
+                        logging.error(
+                            f"Failed to process Issue #{issue_number} in {repo.full_name} after {max_retries} retries."
+                        )
+                    else:
+                        time.sleep(retry_interval)  # Wait before retrying
 
 
 def process_repository(
@@ -411,11 +480,14 @@ def process_repository(
 ):
     try:
         start_issue_number = repo_settings.get("start_issue_number", 1)
+        branch = repo_settings.get("branch", None)
         repo = github_client.get_repo(repo_full_name.strip())
         logging.info(f"Processing repository: {repo_full_name}")
 
         # Load or build vector store
-        vectorstore = load_or_build_vectorstore(repo, embeddings, github_token, config)
+        vectorstore = load_or_build_vectorstore(
+            repo, embeddings, github_token, config, branch
+        )
         retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
 
         # Create retrieval chain
@@ -433,6 +505,7 @@ def process_repository(
             start_issue_number,
             args.debug,
             signature_template,
+            max_retries=3,
         )
     except Exception as e:
         logging.error(
@@ -452,6 +525,9 @@ def main():
 
     # Load configurations
     config = load_config()
+
+    # Validate configurations
+    validate_config(config)
 
     github_token = os.getenv("GITHUB_TOKEN", None)
     if not github_token:
