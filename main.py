@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 import yaml
 import argparse
 from ratelimit import limits, sleep_and_retry
+import textwrap
 
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
@@ -191,7 +192,7 @@ def get_prompt_template(prompt_template: str):
     Retrieve the prompt template.
     """
     return PromptTemplate(
-        template=prompt_template, input_variables=["input", "context"]
+        template=textwrap.dedent(prompt_template), input_variables=["input", "context"]
     )
 
 
