@@ -46,6 +46,23 @@ def load_config(yaml_file="config.yaml"):
     return config
 
 
+def validate_config(config):
+    required_keys = [
+        "github_base_url",
+        "repositories",
+        "embedding_backend",
+        "llm_backend",
+        "model_name",
+        "signature",
+        "prompt_template",
+    ]
+    for key in required_keys:
+        if key not in config:
+            logging.error(f"Missing required configuration key: {key}")
+            sys.exit(1)
+    logging.info("Configuration validation passed.")
+
+
 def initialize_llm(backend="openai", **kwargs):
     """
     Initialize the Language Model (LLM) based on the selected backend.
@@ -452,6 +469,9 @@ def main():
 
     # Load configurations
     config = load_config()
+
+    # Validate configurations
+    validate_config(config)
 
     github_token = os.getenv("GITHUB_TOKEN", None)
     if not github_token:
