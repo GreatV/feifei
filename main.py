@@ -3,7 +3,6 @@ import sys
 import time
 import json
 import logging
-import chardet
 import concurrent.futures
 from github import Github
 from git import Repo
@@ -236,11 +235,12 @@ def load_or_build_vectorstore(repo, embeddings, github_token, config):
 
 
 def is_binary_file(filepath):
-    with open(filepath, 'rb') as file:
+    with open(filepath, "rb") as file:
         initial_bytes = file.read(1024)
-        if b'\0' in initial_bytes:
+        if b"\0" in initial_bytes:
             return True
     return False
+
 
 def fetch_file_content(file_path):
     if is_binary_file(file_path):
@@ -396,6 +396,47 @@ def check_and_reply_new_issues(
                 )
 
 
+def process_repository(
+    repo_full_name,
+    repo_settings,
+    embeddings,
+    combine_docs_chain,
+    github_token,
+    config,
+    args,
+    llm_model_name,
+    github_client,
+):
+    try:
+        start_issue_number = repo_settings.get("start_issue_number", 1)
+        repo = github_client.get_repo(repo_full_name.strip())
+        logging.info(f"Processing repository: {repo_full_name}")
+
+        # Load or build vector store
+        vectorstore = load_or_build_vectorstore(repo, embeddings, github_token, config)
+        retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+
+        # Create retrieval chain
+        qa_chain = create_retrieval_chain(
+            combine_docs_chain=combine_docs_chain,
+            retriever=retriever,
+        )
+
+        # Check and reply to new issues
+        check_and_reply_new_issues(
+            repo,
+            retriever,
+            qa_chain,
+            llm_model_name,
+            start_issue_number,
+            args.debug,
+        )
+    except Exception as e:
+        logging.error(
+            f"An error occurred while processing repository {repo_full_name}: {e}"
+        )
+
+
 def main():
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Process GitHub issues.")
@@ -414,7 +455,7 @@ def main():
         raise ValueError(
             "GitHub token not found. Please set the GITHUB_TOKEN environment variable."
         )
-    g = Github(
+    github_client = Github(
         base_url=config.get("github_base_url", "https://api.github.com"),
         login_or_token=github_token,
     )
@@ -456,32 +497,33 @@ def main():
         while True:
             try:
                 logging.info("Checking for new issues...")
-                for repo_full_name, repo_settings in repositories_config.items():
-                    start_issue_number = repo_settings.get("start_issue_number", 1)
-                    repo = g.get_repo(repo_full_name.strip())
-                    logging.info(f"Processing repository: {repo_full_name}")
-
-                    # Load or build vector store
-                    vectorstore = load_or_build_vectorstore(
-                        repo, embeddings, github_token, config
-                    )
-                    retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
-
-                    # Create the RetrievalQA chain with the initialized retriever
-                    qa_chain = create_retrieval_chain(
-                        combine_docs_chain=combine_docs_chain,
-                        retriever=retriever,
-                    )
-
-                    # Check and reply to new issues
-                    check_and_reply_new_issues(
-                        repo,
-                        retriever,
-                        qa_chain,
-                        llm_model_name,
-                        start_issue_number,
-                        args.debug,
-                    )
+                
+                # Process repositories concurrently
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future_to_repo = {
+                        executor.submit(
+                            process_repository,
+                            repo_full_name,
+                            repo_settings,
+                            embeddings,
+                            combine_docs_chain,
+                            github_token,
+                            config,
+                            args,
+                            llm_model_name,
+                            github_client,
+                        ): repo_full_name
+                        for repo_full_name, repo_settings in repositories_config.items()
+                    }
+                    # Wait for all futures to complete
+                    for future in concurrent.futures.as_completed(future_to_repo):
+                        repo_full_name = future_to_repo[future]
+                        try:
+                            future.result()
+                        except Exception as exc:
+                            logging.error(
+                                f"{repo_full_name} generated an exception: {exc}"
+                            )
 
                 logging.info(
                     f"Done. Sleeping for {config.get('check_interval', 600)} seconds."
