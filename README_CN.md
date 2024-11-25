@@ -94,6 +94,12 @@ repositories:
 python main.py
 ```
 
+您可以使用 `--debug` 命令行参数来启用调试模式：
+
+```bash
+python main.py --debug
+```
+
 机器人将开始监控指定的仓库中的新Issue并自动回复。
 
 #### 自定义

@@ -94,6 +94,12 @@ Run the main script:
 python main.py
 ```
 
+To enable debug mode, use the `--debug` command line argument:
+
+```bash
+python main.py --debug
+```
+
 The bot will start monitoring the specified repositories for new issues and respond automatically.
 
 ## Customization

@@ -3,7 +3,7 @@ import sys
 import time
 import json
 import logging
-import mimetypes
+import chardet
 import concurrent.futures
 from github import Github
 from git import Repo
@@ -235,17 +235,20 @@ def load_or_build_vectorstore(repo, embeddings, github_token, config):
         return vectorstore
 
 
-def fetch_file_content(file_path):
-    """
-    Fetch the content of a file, handling encoding errors.
-    """
-    try:
-        mime_type, _ = mimetypes.guess_type(file_path)
-        if mime_type and not mime_type.startswith("text"):
-            logging.info(f"Skipping binary file {file_path}")
-            return None
+def is_binary_file(filepath):
+    with open(filepath, 'rb') as file:
+        initial_bytes = file.read(1024)
+        if b'\0' in initial_bytes:
+            return True
+    return False
 
-        with open(file_path, "r", encoding="utf-8", errors="ignore") as file:
+def fetch_file_content(file_path):
+    if is_binary_file(file_path):
+        logging.info(f"Skipping binary file {file_path}")
+        return None
+
+    try:
+        with open(file_path, "r") as file:
             content = file.read()
         return {
             "path": file_path,
