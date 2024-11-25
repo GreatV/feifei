@@ -21,9 +21,13 @@ from langchain.chains.combine_documents import create_stuff_documents_chain
 # Load environment variables from a .env file if present
 load_dotenv()
 
+
 # Configure logging
+logging_level = "INFO"
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+    level=getattr(logging, logging_level),
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler("feifei-bot.log"), logging.StreamHandler()],
 )
 
 
@@ -160,6 +164,26 @@ def format_document(doc):
     return f"Title: {title}\nLink: {url}\nContent: {doc.page_content}\n"
 
 
+def rebuild_vectorstore(
+    repo, embeddings, github_token, VECTORSTORE_PATH, REPO_STATE_PATH
+):
+    """
+    Rebuild the vector store and update the repository state.
+    """
+    documents = fetch_documents_from_repo(repo, github_token)
+    vectorstore = FAISS.from_documents(documents, embeddings)
+    vectorstore.save_local(VECTORSTORE_PATH)
+
+    # Save the latest commit SHA to track changes
+    latest_commit = repo.get_commits()[0]
+    repo_state = {"latest_commit_sha": latest_commit.sha}
+    with open(REPO_STATE_PATH, "w") as f:
+        json.dump(repo_state, f)
+
+    logging.info(f"Built and saved vector store for {repo.full_name}")
+    return vectorstore
+
+
 def load_or_build_vectorstore(repo, embeddings, github_token, config):
     """
     Load an existing vector store or build a new one if the repository has new commits.
@@ -195,31 +219,16 @@ def load_or_build_vectorstore(repo, embeddings, github_token, config):
 
         # If the vector store is missing, empty, or fails to load, rebuild it
         logging.info(f"Building a new vector store for {repo.full_name}")
-        documents = fetch_documents_from_repo(repo, github_token)
-        vectorstore = FAISS.from_documents(documents, embeddings)
-        vectorstore.save_local(VECTORSTORE_PATH)
-
-        # Save the latest commit SHA to track changes
-        latest_commit = repo.get_commits()[0]
-        repo_state = {"latest_commit_sha": latest_commit.sha}
-        with open(REPO_STATE_PATH, "w") as f:
-            json.dump(repo_state, f)
-
-        logging.info(f"Built and saved vector store for {repo.full_name}")
-        return vectorstore
+        return rebuild_vectorstore(
+            repo, embeddings, github_token, VECTORSTORE_PATH, REPO_STATE_PATH
+        )
 
     except Exception as e:
         logging.error(f"Error in load_or_build_vectorstore: {e}")
         # Rebuild the vector store as a last resort and update commit SHA
-        documents = fetch_documents_from_repo(repo, github_token)
-        vectorstore = FAISS.from_documents(documents, embeddings)
-        vectorstore.save_local(VECTORSTORE_PATH)
-        # Save the latest commit SHA to track changes
-        latest_commit = repo.get_commits()[0]
-        repo_state = {"latest_commit_sha": latest_commit.sha}
-        with open(REPO_STATE_PATH, "w") as f:
-            json.dump(repo_state, f)
-        return vectorstore
+        return rebuild_vectorstore(
+            repo, embeddings, github_token, VECTORSTORE_PATH, REPO_STATE_PATH
+        )
 
 
 def is_binary_file(filepath):
@@ -528,9 +537,9 @@ def main():
                 )
             except Exception as e:
                 logging.error(f"An error occurred: {e}")
-
-            # Wait for the specified interval before checking again
-            time.sleep(config.get("check_interval", 600))
+            finally:
+                # Wait for the specified interval before checking again
+                time.sleep(config.get("check_interval", 600))
     except KeyboardInterrupt:
         logging.info("Program terminated by user.")
         sys.exit(0)
