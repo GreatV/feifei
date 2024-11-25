@@ -44,15 +44,15 @@ OPENAI_RATE_PERIOD = 60  # 1 minute
 # Decorator to handle GitHub API rate limiting
 @sleep_and_retry
 @limits(calls=GITHUB_RATE_LIMIT, period=GITHUB_RATE_PERIOD)
-def github_api_request(func, *args, **kwargs):
-    return func(*args, **kwargs)
+def get_issues_with_rate_limit(repo, state="open"):
+    return repo.get_issues(state=state)
 
 
 # Decorator to handle OpenAI API rate limiting
 @sleep_and_retry
 @limits(calls=OPENAI_RATE_LIMIT, period=OPENAI_RATE_PERIOD)
-def openai_api_request(func, *args, **kwargs):
-    return func(*args, **kwargs)
+def openai_api_request(qa_chain, question):
+    return qa_chain.invoke({"input": question})
 
 
 # Load configuration from YAML file
@@ -405,10 +405,10 @@ def fetch_documents_from_repo(repo, github_token, branch=None):
 
     try:
         if os.path.exists(repo_dir):
-            github_api_request(Repo(repo_dir).remote().pull)
-            github_api_request(Repo(repo_dir).git.checkout, branch)
+            Repo(repo_dir).remote().pull()
+            Repo(repo_dir).git.checkout(branch)
         else:
-            github_api_request(Repo.clone_from, repo.clone_url, repo_dir, branch=branch)
+            Repo.clone_from(repo.clone_url, repo_dir, branch=branch)
 
         source_files = []
         for root, _, files in os.walk(repo_dir):
@@ -521,13 +521,19 @@ def check_and_reply_new_issues(
     processed_issues = get_processed_issues(repo)
 
     # Get open issues
-    open_issues = github_api_request(repo.get_issues, state="open")
+    open_issues = get_issues_with_rate_limit(repo, state="open")
 
     for issue in open_issues:
         issue_number = issue.number
 
         # Skip issues with numbers less than start_issue_number
         if issue_number < start_issue_number:
+            continue
+
+        # Skip pull requests
+        if issue.pull_request is not None:
+            logging.info(f"Skipping PR #{issue_number} in {repo.full_name}")
+            mark_issue_as_processed(repo, issue_number)
             continue
 
         if issue_number not in processed_issues:
@@ -549,7 +555,7 @@ def check_and_reply_new_issues(
                         f"Processing Issue #{issue_number} in {repo.full_name}"
                     )
                     # Generate answer using qa_chain
-                    response = openai_api_request(qa_chain.invoke, {"input": question})
+                    response = openai_api_request(qa_chain, question)
 
                     # Get the answer from the response
                     answer = response.get("answer", response.get("result", ""))
