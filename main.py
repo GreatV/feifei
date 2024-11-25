@@ -11,6 +11,7 @@ import portalocker
 from dotenv import load_dotenv
 import yaml
 import argparse
+from ratelimit import limits, sleep_and_retry
 
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
@@ -29,6 +30,28 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[logging.FileHandler("feifei-bot.log"), logging.StreamHandler()],
 )
+
+# Define rate limits (e.g., 5000 requests per hour for GitHub)
+GITHUB_RATE_LIMIT = 5000
+GITHUB_RATE_PERIOD = 3600  # 1 hour
+
+# Define rate limits for OpenAI API if applicable
+OPENAI_RATE_LIMIT = 60
+OPENAI_RATE_PERIOD = 60  # 1 minute
+
+
+# Decorator to handle GitHub API rate limiting
+@sleep_and_retry
+@limits(calls=GITHUB_RATE_LIMIT, period=GITHUB_RATE_PERIOD)
+def github_api_request(func, *args, **kwargs):
+    return func(*args, **kwargs)
+
+
+# Decorator to handle OpenAI API rate limiting
+@sleep_and_retry
+@limits(calls=OPENAI_RATE_LIMIT, period=OPENAI_RATE_PERIOD)
+def openai_api_request(func, *args, **kwargs):
+    return func(*args, **kwargs)
 
 
 # Load configuration from YAML file
@@ -282,9 +305,9 @@ def fetch_documents_from_repo(repo, github_token):
 
     try:
         if os.path.exists(repo_dir):
-            Repo(repo_dir).remote().pull()
+            github_api_request(Repo(repo_dir).remote().pull)
         else:
-            Repo.clone_from(repo.clone_url, repo_dir)
+            github_api_request(Repo.clone_from, repo.clone_url, repo_dir)
 
         source_files = []
         for root, _, files in os.walk(repo_dir):
@@ -363,7 +386,7 @@ def check_and_reply_new_issues(
     processed_issues = get_processed_issues(repo)
 
     # Get open issues
-    open_issues = repo.get_issues(state="open")
+    open_issues = github_api_request(repo.get_issues, state="open")
 
     for issue in open_issues:
         issue_number = issue.number
@@ -384,7 +407,7 @@ def check_and_reply_new_issues(
             try:
                 logging.info(f"Processing Issue #{issue_number} in {repo.full_name}")
                 # Generate answer using qa_chain
-                response = qa_chain.invoke({"input": question})
+                response = openai_api_request(qa_chain.invoke, {"input": question})
 
                 # Get the answer from the response
                 answer = response.get("answer", response.get("result", ""))
