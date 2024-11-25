@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 import yaml
 import argparse
 from ratelimit import limits, sleep_and_retry
+import textwrap
 
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
@@ -43,19 +44,28 @@ OPENAI_RATE_PERIOD = 60  # 1 minute
 # Decorator to handle GitHub API rate limiting
 @sleep_and_retry
 @limits(calls=GITHUB_RATE_LIMIT, period=GITHUB_RATE_PERIOD)
-def github_api_request(func, *args, **kwargs):
-    return func(*args, **kwargs)
+def get_issues_with_rate_limit(repo, state="open"):
+    return repo.get_issues(state=state)
 
 
 # Decorator to handle OpenAI API rate limiting
 @sleep_and_retry
 @limits(calls=OPENAI_RATE_LIMIT, period=OPENAI_RATE_PERIOD)
-def openai_api_request(func, *args, **kwargs):
-    return func(*args, **kwargs)
+def openai_api_request(qa_chain, question):
+    return qa_chain.invoke({"input": question})
 
 
 # Load configuration from YAML file
 def load_config(yaml_file="config.yaml"):
+    """
+    Load configuration from a YAML file.
+
+    Args:
+        yaml_file (str): Path to the YAML configuration file.
+
+    Returns:
+        dict: Configuration dictionary.
+    """
     try:
         with open(yaml_file, "r") as f:
             config = yaml.safe_load(f)
@@ -70,6 +80,15 @@ def load_config(yaml_file="config.yaml"):
 
 
 def validate_config(config):
+    """
+    Validate the configuration dictionary to ensure all required keys are present.
+
+    Args:
+        config (dict): Configuration dictionary.
+
+    Returns:
+        None
+    """
     required_keys = [
         "github_base_url",
         "repositories",
@@ -89,6 +108,13 @@ def validate_config(config):
 def initialize_llm(backend="openai", **kwargs):
     """
     Initialize the Language Model (LLM) based on the selected backend.
+
+    Args:
+        backend (str): The backend to use for the LLM.
+        **kwargs: Additional keyword arguments for the LLM initialization.
+
+    Returns:
+        object: Initialized LLM object.
     """
     if backend == "openai":
         from langchain_openai import ChatOpenAI
@@ -162,6 +188,13 @@ def initialize_llm(backend="openai", **kwargs):
 def initialize_embeddings(backend="openai", **kwargs):
     """
     Initialize the embeddings model based on the selected backend.
+
+    Args:
+        backend (str): The backend to use for the embeddings.
+        **kwargs: Additional keyword arguments for the embeddings initialization.
+
+    Returns:
+        object: Initialized embeddings object.
     """
     if backend == "openai":
         from langchain_openai import OpenAIEmbeddings
@@ -189,19 +222,16 @@ def initialize_embeddings(backend="openai", **kwargs):
 def get_prompt_template(prompt_template: str):
     """
     Retrieve the prompt template.
+
+    Args:
+        prompt_template (str): The prompt template string.
+
+    Returns:
+        PromptTemplate: The prompt template object.
     """
     return PromptTemplate(
-        template=prompt_template, input_variables=["input", "context"]
+        template=textwrap.dedent(prompt_template), input_variables=["input", "context"]
     )
-
-
-def format_document(doc):
-    """
-    Format a document to include metadata for the context.
-    """
-    title = doc.metadata.get("title", "Untitled")
-    url = doc.metadata.get("url", "")
-    return f"Title: {title}\nLink: {url}\nContent: {doc.page_content}\n"
 
 
 def rebuild_vectorstore(
@@ -209,6 +239,17 @@ def rebuild_vectorstore(
 ):
     """
     Rebuild the vector store and update the repository state.
+
+    Args:
+        repo (Repository): The GitHub repository object.
+        embeddings (object): The embeddings object.
+        github_token (str): GitHub token for authentication.
+        VECTORSTORE_PATH (str): Path to save the vector store.
+        REPO_STATE_PATH (str): Path to save the repository state.
+        branch (str): Branch to fetch documents from.
+
+    Returns:
+        FAISS: The rebuilt vector store object.
     """
     documents = fetch_documents_from_repo(repo, github_token, branch)
     vectorstore = FAISS.from_documents(documents, embeddings)
@@ -227,6 +268,16 @@ def rebuild_vectorstore(
 def load_or_build_vectorstore(repo, embeddings, github_token, config, branch="main"):
     """
     Load an existing vector store or build a new one if the repository has new commits.
+
+    Args:
+        repo (Repository): The GitHub repository object.
+        embeddings (object): The embeddings object.
+        github_token (str): GitHub token for authentication.
+        config (dict): Configuration dictionary.
+        branch (str): Branch to fetch documents from.
+
+    Returns:
+        FAISS: The loaded or rebuilt vector store object.
     """
     VECTORSTORE_PATH = os.path.join(
         os.getcwd(), f"{repo.full_name.replace('/', '_')}_vectorstore"
@@ -272,6 +323,15 @@ def load_or_build_vectorstore(repo, embeddings, github_token, config, branch="ma
 
 
 def is_binary_file(filepath):
+    """
+    Check if a file is binary.
+
+    Args:
+        filepath (str): Path to the file.
+
+    Returns:
+        bool: True if the file is binary, False otherwise.
+    """
     with open(filepath, "rb") as file:
         initial_bytes = file.read(1024)
         if b"\0" in initial_bytes:
@@ -280,6 +340,17 @@ def is_binary_file(filepath):
 
 
 def fetch_file_content(file_path, repo_url, branch):
+    """
+    Fetch the content of a file.
+
+    Args:
+        file_path (str): Path to the file.
+        repo_url (str): URL of the repository.
+        branch (str): Branch to fetch the file from.
+
+    Returns:
+        dict: Dictionary containing file path, content, and URL.
+    """
     if is_binary_file(file_path):
         logging.info(f"Skipping binary file {file_path}")
         return None
@@ -300,6 +371,14 @@ def fetch_file_content(file_path, repo_url, branch):
 def fetch_documents_from_repo(repo, github_token, branch=None):
     """
     Fetch documents from a GitHub repository, including source code.
+
+    Args:
+        repo (Repository): The GitHub repository object.
+        github_token (str): GitHub token for authentication.
+        branch (str): Branch to fetch documents from.
+
+    Returns:
+        list: List of Document objects.
     """
     documents = []
     repo_dir = f"/tmp/{repo.full_name.replace('/', '_')}"
@@ -311,10 +390,10 @@ def fetch_documents_from_repo(repo, github_token, branch=None):
 
     try:
         if os.path.exists(repo_dir):
-            github_api_request(Repo(repo_dir).remote().pull)
-            github_api_request(Repo(repo_dir).git.checkout, branch)
+            Repo(repo_dir).remote().pull()
+            Repo(repo_dir).git.checkout(branch)
         else:
-            github_api_request(Repo.clone_from, repo.clone_url, repo_dir, branch=branch)
+            Repo.clone_from(repo.clone_url, repo_dir, branch=branch)
 
         source_files = []
         for root, _, files in os.walk(repo_dir):
@@ -358,6 +437,12 @@ def fetch_documents_from_repo(repo, github_token, branch=None):
 def get_processed_issues(repo):
     """
     Get the set of processed issue numbers from a file specific to the repository.
+
+    Args:
+        repo (Repository): The GitHub repository object.
+
+    Returns:
+        set: Set of processed issue numbers.
     """
     PROCESSED_ISSUES_FILE = f"{repo.full_name.replace('/', '_')}_processed_issues.txt"
     if not os.path.exists(PROCESSED_ISSUES_FILE):
@@ -373,6 +458,13 @@ def get_processed_issues(repo):
 def mark_issue_as_processed(repo, issue_number):
     """
     Mark an issue as processed by adding it to the repository-specific file.
+
+    Args:
+        repo (Repository): The GitHub repository object.
+        issue_number (int): The issue number to mark as processed.
+
+    Returns:
+        None
     """
     PROCESSED_ISSUES_FILE = f"{repo.full_name.replace('/', '_')}_processed_issues.txt"
     with open(PROCESSED_ISSUES_FILE, "a") as f:
@@ -396,17 +488,37 @@ def check_and_reply_new_issues(
 ):
     """
     Check for new issues in a repository and reply to them using the QA chain.
+
+    Args:
+        repo (Repository): The GitHub repository object.
+        retriever (object): The retriever object.
+        qa_chain (object): The QA chain object.
+        llm_model_name (str): The name of the LLM model.
+        start_issue_number (int): The starting issue number to check.
+        debug (bool): Debug mode flag.
+        signature_template (str): The signature template string.
+        max_retries (int): Maximum number of retries for processing an issue.
+        retry_interval (int): Interval between retries in seconds.
+
+    Returns:
+        None
     """
     processed_issues = get_processed_issues(repo)
 
     # Get open issues
-    open_issues = github_api_request(repo.get_issues, state="open")
+    open_issues = get_issues_with_rate_limit(repo, state="open")
 
     for issue in open_issues:
         issue_number = issue.number
 
         # Skip issues with numbers less than start_issue_number
         if issue_number < start_issue_number:
+            continue
+
+        # Skip pull requests
+        if issue.pull_request is not None:
+            logging.info(f"Skipping PR #{issue_number} in {repo.full_name}")
+            mark_issue_as_processed(repo, issue_number)
             continue
 
         if issue_number not in processed_issues:
@@ -428,7 +540,7 @@ def check_and_reply_new_issues(
                         f"Processing Issue #{issue_number} in {repo.full_name}"
                     )
                     # Generate answer using qa_chain
-                    response = openai_api_request(qa_chain.invoke, {"input": question})
+                    response = openai_api_request(qa_chain, question)
 
                     # Get the answer from the response
                     answer = response.get("answer", response.get("result", ""))
@@ -478,6 +590,24 @@ def process_repository(
     github_client,
     signature_template,
 ):
+    """
+    Process a repository by loading or building the vector store and checking for new issues.
+
+    Args:
+        repo_full_name (str): Full name of the repository.
+        repo_settings (dict): Repository-specific settings.
+        embeddings (object): The embeddings object.
+        combine_docs_chain (object): The combined documents chain object.
+        github_token (str): GitHub token for authentication.
+        config (dict): Configuration dictionary.
+        args (Namespace): Command-line arguments.
+        llm_model_name (str): The name of the LLM model.
+        github_client (Github): The GitHub client object.
+        signature_template (str): The signature template string.
+
+    Returns:
+        None
+    """
     try:
         start_issue_number = repo_settings.get("start_issue_number", 1)
         branch = repo_settings.get("branch", None)
@@ -514,6 +644,9 @@ def process_repository(
 
 
 def main():
+    """
+    Main function to process GitHub issues.
+    """
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Process GitHub issues.")
     parser.add_argument(
