@@ -234,21 +234,6 @@ def get_prompt_template(prompt_template: str):
     )
 
 
-def format_document(doc):
-    """
-    Format a document to include metadata for the context.
-
-    Args:
-        doc (Document): The document to format.
-
-    Returns:
-        str: Formatted document string.
-    """
-    title = doc.metadata.get("title", "Untitled")
-    url = doc.metadata.get("url", "")
-    return f"Title: {title}\nLink: {url}\nContent: {doc.page_content}\n"
-
-
 def rebuild_vectorstore(
     repo, embeddings, github_token, VECTORSTORE_PATH, REPO_STATE_PATH, branch="main"
 ):
