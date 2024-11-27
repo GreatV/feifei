@@ -467,9 +467,10 @@ def fetch_existing_issues(repo, recent_period=None):
         # Skip pull requests
         if issue.pull_request is not None:
             continue
-        content = f"Issue Title: {issue.title}\n\n{issue.body or ''}"
+        content = f"Issue Title: {issue.title}\nIssue URL: {issue.html_url}\n\n{issue.body or ''}"
         metadata = {
             "source": f"Issue #{issue.number}",
+            "title": issue.title,
             "url": issue.html_url,
             "created_at": issue.created_at.isoformat(),
             "updated_at": issue.updated_at.isoformat(),
@@ -570,11 +571,10 @@ def fetch_existing_discussions(repo, github_token, recent_period=None):
                 logging.info(
                     f"Fetching Discussion #{discussion['number']} from {repo.full_name}"
                 )
-                content = (
-                    f"Discussion Title: {discussion['title']}\n\n{discussion['body']}"
-                )
+                content = f"Discussion Title: {discussion['title']}\nDiscussion URL: {discussion['url']}\n\n{discussion['body']}"
                 metadata = {
                     "source": f"Discussion #{discussion['number']}",
+                    "title": discussion["title"],
                     "url": discussion["url"],
                     "created_at": discussion["createdAt"],
                     "updated_at": discussion["updatedAt"],
