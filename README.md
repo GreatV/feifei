@@ -33,7 +33,7 @@ This repository contains a Python script that automates responses to new issues 
 1. **Clone the Repository**
 
    ```bash
-   https://github.com/GreatV/feifei.git
+   git clone https://github.com/GreatV/feifei.git
    cd feifei
    ```
 

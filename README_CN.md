@@ -33,7 +33,7 @@
 1. **克隆仓库**
 
    ```bash
-   https://github.com/GreatV/feifei.git
+   git clone https://github.com/GreatV/feifei.git
    cd feifei
    ```
 
