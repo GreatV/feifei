@@ -474,3 +474,234 @@ def check_and_reply_new_issues(
             )
 
     logging.info(f"Checked and replied to new issues for {repo.full_name}")
+
+
+def get_processed_discussions(repo):
+    """
+    Get the set of processed discussion numbers from a file specific to the repository.
+
+    Args:
+        repo (Repository): The GitHub repository object.
+
+    Returns:
+        set: Set of processed discussion numbers.
+    """
+    processed_discussions_file = os.path.join(
+        ".cache", f"{repo.full_name.replace('/', '_')}_processed_discussions.txt"
+    )
+    os.makedirs(os.path.dirname(processed_discussions_file), exist_ok=True)
+    if not os.path.exists(processed_discussions_file):
+        with open(processed_discussions_file, "w") as f:
+            pass
+    with open(processed_discussions_file, "r") as f:
+        portalocker.lock(f, portalocker.LOCK_SH)
+        processed = f.read().splitlines()
+        portalocker.unlock(f)
+    logging.info(f"Processed discussions retrieved for {repo.full_name}")
+    return set(int(i) for i in processed if i.strip())
+
+
+def mark_discussion_as_processed(repo, discussion_number):
+    """
+    Mark a discussion as processed by adding it to the repository-specific file.
+
+    Args:
+        repo (Repository): The GitHub repository object.
+        discussion_number (int): The discussion number to mark as processed.
+
+    Returns:
+        None
+    """
+    processed_discussions_file = os.path.join(
+        ".cache", f"{repo.full_name.replace('/', '_')}_processed_discussions.txt"
+    )
+    os.makedirs(os.path.dirname(processed_discussions_file), exist_ok=True)
+    with open(processed_discussions_file, "a") as f:
+        portalocker.lock(f, portalocker.LOCK_EX)
+        f.write(f"{discussion_number}\n")
+        portalocker.unlock(f)
+    logging.info(
+        f"Discussion #{discussion_number} marked as processed for {repo.full_name}"
+    )
+
+
+def check_and_reply_new_discussions(
+    repo,
+    retriever,
+    qa_chain,
+    llm_model_name,
+    start_discussion_number,
+    debug,
+    signature_template,
+    github_token,
+):
+    """
+    Check for new discussions in a repository and reply to them using the QA chain.
+
+    Args:
+        repo (Repository): The GitHub repository object.
+        retriever (object): The retriever object.
+        qa_chain (object): The QA chain object.
+        llm_model_name (str): The name of the LLM model.
+        start_discussion_number (int): The starting discussion number to check.
+        debug (bool): Debug mode flag.
+        signature_template (str): The signature template string.
+        github_token (str): GitHub token for authentication.
+
+    Returns:
+        None
+    """
+    processed_discussions = get_processed_discussions(repo)
+
+    # Use GitHub GraphQL API to fetch discussions
+    has_next_page = True
+    end_cursor = None
+
+    headers = {
+        "Authorization": f"Bearer {github_token}",
+        "Content-Type": "application/json",
+    }
+
+    while has_next_page:
+        query = """
+        query($owner: String!, $name: String!, $after: String) {
+          repository(owner: $owner, name: $name) {
+            discussions(first: 100, after: $after, orderBy: {field: CREATED_AT, direction: DESC}) {
+              pageInfo {
+                endCursor
+                hasNextPage
+              }
+              nodes {
+                number
+                title
+                body
+                url
+                createdAt
+                updatedAt
+                comments(first: 100) {
+                  totalCount
+                }
+              }
+            }
+          }
+        }
+        """
+        variables = {
+            "owner": repo.owner.login,
+            "name": repo.name,
+            "after": end_cursor,
+        }
+
+        response = requests.post(
+            "https://api.github.com/graphql",
+            headers=headers,
+            json={"query": query, "variables": variables},
+        )
+
+        if response.status_code == 200:
+            data = response.json()
+            repository = data.get("data", {}).get("repository", {})
+            if not repository:
+                logging.error(f"No repository data found for {repo.full_name}")
+                break
+
+            discussions = repository.get("discussions", {}).get("nodes", [])
+            page_info = repository.get("discussions", {}).get("pageInfo", {})
+            has_next_page = page_info.get("hasNextPage", False)
+            end_cursor = page_info.get("endCursor", None)
+
+            for discussion in discussions:
+                discussion_number = discussion["number"]
+
+                if discussion_number <= start_discussion_number:
+                    continue
+
+                if discussion_number in processed_discussions:
+                    continue
+
+                # Skip discussions that have already been replied to
+                if discussion["comments"]["totalCount"] > 0:
+                    logging.info(
+                        f"Skipping Discussion #{discussion_number}, already has comments."
+                    )
+                    mark_discussion_as_processed(repo, discussion_number)
+                    continue
+
+                question = f"{discussion['title']}\n\n{discussion['body'] or ''}"
+
+                if not question.strip():
+                    logging.info(
+                        f"Skipping Discussion #{discussion_number} because it has no content."
+                    )
+                    mark_discussion_as_processed(repo, discussion_number)
+                    continue
+
+                # try:
+                logging.info(
+                    f"Processing Discussion #{discussion_number} in {repo.full_name}"
+                )
+                response = qa_chain.invoke({"input": question})
+                answer = response.get("answer", response.get("result", ""))
+
+                signature = signature_template.format(model_name=llm_model_name)
+                full_answer = f"{answer.strip()}{signature}"
+
+                logging.info(
+                    f"Answer for Discussion #{discussion_number}: {full_answer}"
+                )
+
+                discussion_schema = """
+                    id
+                    number
+                    title
+                    body
+                    createdAt
+                    updatedAt
+                    comments(first: 100) {
+                        nodes {
+                            id
+                            body
+                        }
+                        totalCount
+                        pageInfo {
+                            hasNextPage
+                            endCursor
+                        }
+                    }
+                """
+
+                if not debug:
+                    # Post a comment to the discussion
+                    discussion_obj = repo.get_discussion(
+                        number=discussion_number,
+                        discussion_graphql_schema=discussion_schema,
+                    )
+                    discussion_obj.add_comment(
+                        body=full_answer,
+                        output_schema="""
+                            id
+                            body
+                            createdAt
+                        """,
+                    )
+                    logging.info(
+                        f"Replied to Discussion #{discussion_number} in {repo.full_name}"
+                    )
+                else:
+                    logging.info(
+                        f"Debug mode: Would have commented on Discussion #{discussion_number}"
+                    )
+
+                mark_discussion_as_processed(repo, discussion_number)
+            # except Exception as e:
+            #     logging.error(
+            #         f"Error processing Discussion #{discussion_number} in {repo.full_name}: {e}"
+            #     )
+
+        else:
+            logging.error(
+                f"Failed to fetch discussions from {repo.full_name}: {response.status_code}, {response.text}"
+            )
+            break
+
+    logging.info(f"Checked and replied to new discussions for {repo.full_name}")

@@ -42,4 +42,5 @@ def validate_config(config):
         if key not in config:
             logging.error(f"Missing required configuration key: {key}")
             sys.exit(1)
+
     logging.info("Configuration validation passed.")

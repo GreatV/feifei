@@ -112,7 +112,10 @@ def initialize_embeddings(backend="openai", **kwargs):
         model_name = kwargs.get(
             "embedding_model_name", "sentence-transformers/all-MiniLM-L6-v2"
         )
-        embeddings = HuggingFaceEmbeddings(model_name=model_name)
+        embeddings = HuggingFaceEmbeddings(
+            model_name=model_name,
+            model_kwargs={"device": "cuda", "trust_remote_code": True},
+        )
     else:
         raise ValueError(f"Unsupported embedding backend: {backend}")
     logging.info(f"Initialized embeddings with backend: {backend}")

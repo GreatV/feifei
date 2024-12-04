@@ -9,6 +9,8 @@ repositories:
     branch: main
     recent_period:
       months: 1
+    enable_discussion_reply: true
+    start_discussion_number: 1
   owner/repo2:
     start_issue_number: 200
     branch: develop
