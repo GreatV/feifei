@@ -2,9 +2,10 @@
 
 import os
 import logging
-from .vectorstore_utils import load_or_build_vectorstore
-from .github_utils import check_and_reply_new_issues
+from .vectorstore_utils import load_or_update_vectorstore
+from .github_utils import check_and_reply_new_issues, check_and_reply_new_discussions
 from langchain.chains.retrieval import create_retrieval_chain
+
 
 def handle_cuda_oom_error():
     """
@@ -52,8 +53,8 @@ def process_repository(
     repo = github_client.get_repo(repo_full_name.strip())
     logging.info(f"Processing repository: {repo_full_name}")
 
-    # Load or build vector store
-    vectorstore = load_or_build_vectorstore(
+    # Load or update vector store
+    vectorstore = load_or_update_vectorstore(
         repo, embeddings, github_token, config, branch, recent_period
     )
     retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
@@ -74,3 +75,17 @@ def process_repository(
         args.debug,
         signature_template,
     )
+
+    # Check and reply to new discussions if enabled for the repository
+    if repo_settings.get("enable_discussion_reply", False):
+        start_discussion_number = repo_settings.get("start_discussion_number", 1)
+        check_and_reply_new_discussions(
+            repo,
+            retriever,
+            qa_chain,
+            llm_model_name,
+            start_discussion_number,
+            args.debug,
+            signature_template,
+            github_token,
+        )
