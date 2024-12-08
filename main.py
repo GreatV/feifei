@@ -76,7 +76,11 @@ def main():
         device=config.get("device"),
         openai_api_base=config.get("openai_api_base"),
         huggingface_api_base=config.get("huggingface_api_base"),
+        anthropic_api_base=config.get("anthropic_api_base"),
     )
+
+    # Check if compression is enabled
+    enable_compression = config.get("enable_compression", False)
 
     # Get the name of the LLM model for the signature
     llm_model_name = config.get("model_name")
@@ -106,6 +110,7 @@ def main():
                     llm_model_name,
                     github_client,
                     signature_template,
+                    enable_compression,
                 ): repo_full_name
                 for repo_full_name, repo_settings in repositories_config.items()
             }

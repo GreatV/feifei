@@ -73,6 +73,7 @@ embedding_backend: "openai"  # 选项：'openai'，'huggingface'，'local'
 model_name: "gpt-3.5-turbo"  # LLM模型名称
 embedding_model_name: "sentence-transformers/all-MiniLM-L6-v2"
 check_interval: 300  # 检查间隔时间（秒）
+enable_compression: true  # 启用压缩
 repositories:
   yourusername/your-repo:
     start_issue_number: 1
@@ -86,6 +87,7 @@ repositories:
 - **model_name**：LLM模型的名称。
 - **embedding_model_name**：嵌入模型的名称。
 - **check_interval**：机器人检查新Issue的间隔时间（秒）。
+- **enable_compression**：启用压缩。
 - **repositories**：要监控的仓库列表及其设置。
   - **start_issue_number**：开始监控的Issue编号。
   - **branch**：监控的分支。

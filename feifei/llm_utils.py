@@ -19,14 +19,14 @@ def initialize_llm(backend="openai", **kwargs):
 
         llm = ChatOpenAI(
             model=kwargs.get("model_name", "gpt-3.5-turbo"),
-            openai_api_base=kwargs.get("openai_api_base"),
+            openai_api_base=kwargs.get("openai_api_base", "https://api.openai.com/v1"),
         )
     elif backend == "anthropic":
         from langchain_anthropic import ChatAnthropic
 
         llm = ChatAnthropic(
             model_name=kwargs.get("model_name", "claude-v1"),
-            max_tokens_to_sample=kwargs.get("max_tokens_to_sample", 1024),
+            base_url=kwargs.get("anthropic_api_base", "https://api.anthropic.com"),
         )
     elif backend == "google":
         from langchain_google_vertexai import ChatVertexAI

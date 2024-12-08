@@ -619,14 +619,6 @@ def check_and_reply_new_discussions(
                 if discussion_number in processed_discussions:
                     continue
 
-                # Skip discussions that have already been replied to
-                if discussion["comments"]["totalCount"] > 0:
-                    logging.info(
-                        f"Skipping Discussion #{discussion_number}, already has comments."
-                    )
-                    mark_discussion_as_processed(repo, discussion_number)
-                    continue
-
                 question = f"{discussion['title']}\n\n{discussion['body'] or ''}"
 
                 if not question.strip():

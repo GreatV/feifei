@@ -78,6 +78,7 @@ repositories:
     start_issue_number: 1
     branch: "main"  # Branch to monitor
     recent_period: 30  # Period in days to consider recent issues
+enable_compression: true  # Enable or disable response compression
 ```
 
 - **github_base_url**: The base URL for GitHub API requests.
@@ -90,6 +91,7 @@ repositories:
   - **start_issue_number**: The issue number to start monitoring from.
   - **branch**: The branch to monitor for changes.
   - **recent_period**: The period in days to consider issues and discussions as recent.
+- **enable_compression**: Enable or disable response compression.
 
 ## Usage
 
