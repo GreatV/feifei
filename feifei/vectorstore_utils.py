@@ -59,7 +59,7 @@ def load_or_build_vectorstore(
     vectorstore_path = os.path.join(".cache", vectorstore_file)
     repo_state_path = os.path.join(".cache", repo_state_file)
 
-    if os.path.exists(vectorstore_path) and os.path.getsize(vectorstore_path) > 0:
+    if os.path.exists(vectorstore_path) and os.path.getsize(repo_state_path) > 0:
         with open(repo_state_path, "r") as f:
             repo_state = json.load(f)
 
