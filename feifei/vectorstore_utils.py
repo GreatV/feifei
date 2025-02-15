@@ -30,7 +30,7 @@ def rebuild_vectorstore(
         FAISS: The rebuilt vector store object.
     """
     documents = fetch_documents_from_repo(repo, github_token, branch, recent_period)
-    batch_size = 10  # Define batch size
+    batch_size = 5  # Define batch size
     document_size = len(documents)
     init_size = batch_size if document_size > batch_size else document_size
     vectorstore = FAISS.from_documents(documents[:init_size], embeddings)
@@ -138,7 +138,7 @@ def load_or_update_vectorstore(
     vectorstore_path = os.path.join(".cache", vectorstore_file)
     repo_state_path = os.path.join(".cache", repo_state_file)
 
-    if os.path.exists(vectorstore_path) and os.path.getsize(vectorstore_path) > 0:
+    if os.path.exists(vectorstore_path) and os.path.getsize(repo_state_path) > 0:
         with open(repo_state_path, "r") as f:
             repo_state = json.load(f)
 

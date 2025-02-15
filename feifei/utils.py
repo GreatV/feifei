@@ -69,10 +69,10 @@ def process_repository(
         )
         retriever = ContextualCompressionRetriever(
             base_compressor=compressor,
-            base_retriever=vectorstore.as_retriever(search_kwargs={"k": 5}),
+            base_retriever=vectorstore.as_retriever(search_kwargs={"k": 3}),
         )
     else:
-        retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+        retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
 
     # Create retrieval chain
     qa_chain = create_retrieval_chain(
