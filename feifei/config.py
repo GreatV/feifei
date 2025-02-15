@@ -8,10 +8,14 @@ def load_config(yaml_file="config.yaml"):
     Load configuration from a YAML file.
 
     Args:
-        yaml_file (str): Path to the YAML configuration file.
+        yaml_file (str, optional): Path to the YAML configuration file. Defaults to "config.yaml".
 
     Returns:
-        dict: Configuration dictionary.
+        dict: Configuration dictionary containing all settings.
+
+    Raises:
+        FileNotFoundError: If the configuration file doesn't exist.
+        yaml.YAMLError: If the configuration file is not valid YAML.
     """
     with open(yaml_file, "r") as f:
         config = yaml.safe_load(f)
@@ -20,7 +24,15 @@ def load_config(yaml_file="config.yaml"):
 
 
 def validate_config(config):
-    """configuration validation"""
+    """
+    Validate the configuration dictionary to ensure all required keys are present and have correct types.
+
+    Args:
+        config (dict): Configuration dictionary to validate.
+
+    Raises:
+        SystemExit: If any required configuration is missing or has an invalid type.
+    """
     required_keys = {
         "github_base_url": str,
         "repositories": dict,

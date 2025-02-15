@@ -12,6 +12,7 @@ import time
 def handle_cuda_oom_error():
     """
     Handle CUDA out of memory error by setting the PYTORCH_CUDA_ALLOC_CONF environment variable.
+    This allows for expandable memory segments in PyTorch CUDA operations.
     """
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     logging.info(
@@ -36,17 +37,17 @@ def process_repository(
     Process a repository by loading or building the vector store and checking for new issues.
 
     Args:
-        repo_full_name (str): Full name of the repository.
+        repo_full_name (str): Full name of the repository (owner/repo).
         repo_settings (dict): Repository-specific settings.
-        embeddings (object): The embeddings object.
-        combine_docs_chain (object): The combined documents chain object.
+        embeddings (object): The embeddings model object.
+        combine_docs_chain (object): The document combination chain object.
         github_token (str): GitHub token for authentication.
         config (dict): Configuration dictionary.
         args (Namespace): Command-line arguments.
-        llm_model_name (str): The name of the LLM model.
+        llm_model_name (str): Name of the language model being used.
         github_client (Github): The GitHub client object.
-        signature_template (str): The signature template string.
-        enable_compression (bool): Flag to enable or disable document compression.
+        signature_template (str): Template for response signatures.
+        enable_compression (bool): Whether to enable document compression.
 
     Returns:
         None
@@ -110,7 +111,20 @@ def process_repository(
 
 
 def process_repositories_batch(repositories_config, batch_size=3, **kwargs):
-    """batch process repositories to avoid resource overuse"""
+    """
+    Process repositories in batches to avoid resource overuse.
+
+    Args:
+        repositories_config (dict): Configuration dictionary for all repositories.
+        batch_size (int, optional): Number of repositories to process simultaneously. Defaults to 3.
+        **kwargs: Additional keyword arguments to pass to process_repository function.
+
+    Returns:
+        None
+
+    Note:
+        This function includes a delay between batches to avoid hitting API rate limits.
+    """
     repos = list(repositories_config.items())
     for i in range(0, len(repos), batch_size):
         batch = repos[i : i + batch_size]
