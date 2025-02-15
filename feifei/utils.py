@@ -1,4 +1,3 @@
-import os
 import logging
 from .vectorstore_utils import load_or_update_vectorstore
 from .github_utils import check_and_reply_new_issues, check_and_reply_new_discussions
@@ -7,17 +6,6 @@ from langchain.retrievers import ContextualCompressionRetriever
 from langchain_community.document_compressors import LLMLinguaCompressor
 import concurrent.futures
 import time
-
-
-def handle_cuda_oom_error():
-    """
-    Handle CUDA out of memory error by setting the PYTORCH_CUDA_ALLOC_CONF environment variable.
-    This allows for expandable memory segments in PyTorch CUDA operations.
-    """
-    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-    logging.info(
-        "Set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to handle CUDA OOM error."
-    )
 
 
 def process_repository(

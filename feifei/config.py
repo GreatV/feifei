@@ -17,7 +17,7 @@ def load_config(yaml_file="config.yaml"):
         FileNotFoundError: If the configuration file doesn't exist.
         yaml.YAMLError: If the configuration file is not valid YAML.
     """
-    with open(yaml_file, "r") as f:
+    with open(yaml_file, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
     logging.info(f"Configuration loaded from {yaml_file}")
     return config

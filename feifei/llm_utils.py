@@ -35,14 +35,14 @@ def initialize_llm(backend="openai", **kwargs):
         from langchain_openai import ChatOpenAI
 
         llm = ChatOpenAI(
-            model=kwargs.get("model_name", "gpt-3.5-turbo"),
+            model=kwargs.get("model_name", "gpt-4o-latest"),
             openai_api_base=kwargs.get("openai_api_base", "https://api.openai.com/v1"),
         )
     elif backend == "anthropic":
         from langchain_anthropic import ChatAnthropic
 
         llm = ChatAnthropic(
-            model_name=kwargs.get("model_name", "claude-v1"),
+            model_name=kwargs.get("model_name", "claude-3-5-sonnet"),
             base_url=kwargs.get("anthropic_api_base", "https://api.anthropic.com"),
         )
     elif backend == "google":
@@ -50,8 +50,13 @@ def initialize_llm(backend="openai", **kwargs):
 
         llm = ChatVertexAI(
             model_name=kwargs.get("model_name", "chat-bison"),
-            temperature=kwargs.get("temperature", 0.7),
-            max_output_tokens=kwargs.get("max_output_tokens", 1024),
+        )
+    elif backend == "deepseek":
+        from langchain_deepseek import ChatDeepSeek
+
+        llm = ChatDeepSeek(
+            model_name=kwargs.get("model_name", "deepseek-chat"),
+            api_base=kwargs.get("api_base", "https://api.deepseek.com"),
         )
     elif backend == "qianfan":
         from langchain_community.chat_models import QianfanChatEndpoint
