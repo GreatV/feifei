@@ -19,25 +19,31 @@ def rebuild_vectorstore(
 
     Args:
         repo (Repository): The GitHub repository object.
-        embeddings (object): The embeddings object.
+        embeddings (object): The embeddings model object.
         github_token (str): GitHub token for authentication.
         vectorstore_path (str): Path to save the vector store.
         repo_state_path (str): Path to save the repository state.
-        branch (str): Branch to fetch documents from.
-        recent_period (dict): Dictionary with keys 'months' or 'weeks' to filter documents.
+        branch (str, optional): Branch to fetch documents from. Defaults to "main".
+        recent_period (dict, optional): Dictionary with keys 'months' or 'weeks' to filter documents.
 
     Returns:
         FAISS: The rebuilt vector store object.
     """
     documents = fetch_documents_from_repo(repo, github_token, branch, recent_period)
-    batch_size = 5  # Define batch size
-    document_size = len(documents)
-    init_size = batch_size if document_size > batch_size else document_size
-    vectorstore = FAISS.from_documents(documents[:init_size], embeddings)
-    for i in range(init_size, len(documents), batch_size):
-        end_size = i + batch_size if i + batch_size < document_size else document_size
-        batch_documents = documents[i:end_size]
-        vectorstore.add_documents(batch_documents)
+    batch_size = 100
+    for i in range(0, len(documents), batch_size):
+        batch = documents[i : i + batch_size]
+        if i == 0:
+            vectorstore = FAISS.from_documents(batch, embeddings)
+        else:
+            vectorstore.add_documents(batch)
+
+        # force garbage collection every 5 batches
+        if i % (batch_size * 5) == 0:
+            import gc
+
+            gc.collect()
+
     vectorstore.save_local(vectorstore_path)
 
     # Save the latest commit SHA to track changes
@@ -53,6 +59,20 @@ def rebuild_vectorstore(
 def load_or_build_vectorstore(
     repo, embeddings, github_token, config, branch="main", recent_period=None
 ):
+    """
+    Load an existing vector store or build a new one if it doesn't exist.
+
+    Args:
+        repo (Repository): The GitHub repository object.
+        embeddings (object): The embeddings model object.
+        github_token (str): GitHub token for authentication.
+        config (dict): Configuration dictionary.
+        branch (str, optional): Branch to fetch documents from. Defaults to "main".
+        recent_period (dict, optional): Dictionary with keys 'months' or 'weeks' to filter documents.
+
+    Returns:
+        FAISS: The loaded or newly built vector store object.
+    """
     embeddings_model_name = config.get("embedding_model_name", "default")
     vectorstore_file = f"{repo.full_name.replace('/', '_')}_{embeddings_model_name.replace('/', '_')}_vectorstore"
     repo_state_file = f"{repo.full_name.replace('/', '_')}_repo_state.json"
@@ -102,12 +122,12 @@ def update_vectorstore(
 
     Args:
         repo (Repository): The GitHub repository object.
-        embeddings (object): The embeddings object.
+        embeddings (object): The embeddings model object.
         github_token (str): GitHub token for authentication.
         vectorstore_path (str): Path to save the vector store.
         repo_state_path (str): Path to save the repository state.
-        branch (str): Branch to fetch documents from.
-        recent_period (dict): Dictionary with keys 'months' or 'weeks' to filter documents.
+        branch (str, optional): Branch to fetch documents from. Defaults to "main".
+        recent_period (dict, optional): Dictionary with keys 'months' or 'weeks' to filter documents.
 
     Returns:
         FAISS: The updated vector store object.
@@ -132,6 +152,20 @@ def update_vectorstore(
 def load_or_update_vectorstore(
     repo, embeddings, github_token, config, branch="main", recent_period=None
 ):
+    """
+    Load an existing vector store and update it if necessary, or build a new one.
+
+    Args:
+        repo (Repository): The GitHub repository object.
+        embeddings (object): The embeddings model object.
+        github_token (str): GitHub token for authentication.
+        config (dict): Configuration dictionary.
+        branch (str, optional): Branch to fetch documents from. Defaults to "main".
+        recent_period (dict, optional): Dictionary with keys 'months' or 'weeks' to filter documents.
+
+    Returns:
+        FAISS: The loaded and updated or newly built vector store object.
+    """
     embeddings_model_name = config.get("embedding_model_name", "default")
     vectorstore_file = f"{repo.full_name.replace('/', '_')}_{embeddings_model_name.replace('/', '_')}_vectorstore"
     repo_state_file = f"{repo.full_name.replace('/', '_')}_repo_state.json"

@@ -8,11 +8,28 @@ def initialize_llm(backend="openai", **kwargs):
     Initialize the Language Model (LLM) based on the selected backend.
 
     Args:
-        backend (str): The backend to use for the LLM.
-        **kwargs: Additional keyword arguments for the LLM initialization.
+        backend (str): The backend to use for the LLM. Supported options:
+            - 'openai': OpenAI's GPT models
+            - 'anthropic': Anthropic's Claude models
+            - 'google': Google's Vertex AI models
+            - 'qianfan': Baidu's ERNIE models
+            - 'ollama': Local Ollama models
+            - 'huggingface': HuggingFace models via API
+            - 'local': Local HuggingFace models
+        **kwargs: Additional keyword arguments for LLM initialization including:
+            - model_name (str): Name of the model to use
+            - temperature (float): Sampling temperature
+            - max_output_tokens (int): Maximum output length
+            - openai_api_base (str): Base URL for OpenAI API
+            - anthropic_api_base (str): Base URL for Anthropic API
+            - repo_id (str): HuggingFace model repository ID
+            - device (str): Device to run local models on
 
     Returns:
-        object: Initialized LLM object.
+        object: Initialized LLM object from the specified backend.
+
+    Raises:
+        ValueError: If an unsupported backend is specified.
     """
     if backend == "openai":
         from langchain_openai import ChatOpenAI
@@ -89,11 +106,21 @@ def initialize_embeddings(backend="openai", **kwargs):
     Initialize the embeddings model based on the selected backend.
 
     Args:
-        backend (str): The backend to use for the embeddings.
-        **kwargs: Additional keyword arguments for the embeddings initialization.
+        backend (str): The backend to use for embeddings. Supported options:
+            - 'openai': OpenAI's embedding models
+            - 'qianfan': Baidu's ERNIE embedding models
+            - 'huggingface': HuggingFace embedding models
+            - 'local': Local HuggingFace embedding models
+        **kwargs: Additional keyword arguments for embeddings initialization including:
+            - model_name (str): Name of the embedding model
+            - openai_api_base (str): Base URL for OpenAI API
+            - embedding_model_name (str): Name of HuggingFace embedding model
 
     Returns:
-        object: Initialized embeddings object.
+        object: Initialized embeddings object from the specified backend.
+
+    Raises:
+        ValueError: If an unsupported backend is specified.
     """
     if backend == "openai":
         from langchain_openai import OpenAIEmbeddings
@@ -124,13 +151,16 @@ def initialize_embeddings(backend="openai", **kwargs):
 
 def get_prompt_template(prompt_template: str):
     """
-    Retrieve the prompt template.
+    Create a prompt template for generating responses.
 
     Args:
-        prompt_template (str): The prompt template string.
+        prompt_template (str): The template string containing placeholders for:
+            - {input}: The user's input/question
+            - {context}: Retrieved context information
+            - {sources}: Source references
 
     Returns:
-        PromptTemplate: The prompt template object.
+        PromptTemplate: A configured prompt template object with the specified variables.
     """
     return PromptTemplate(
         template=textwrap.dedent(prompt_template),
