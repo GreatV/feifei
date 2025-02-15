@@ -8,15 +8,27 @@ from git import Repo
 from langchain_core.documents import Document
 import time
 from functools import wraps
+import github
 
-def retry_on_connection_error(max_retries=3, delay=1):
+
+def retry_on_connection_error(
+    max_retries=3,
+    delay=1,
+    exceptions=(
+        requests.exceptions.ConnectionError,
+        requests.exceptions.Timeout,
+        requests.exceptions.RequestException,
+        github.GithubException,
+    ),
+):
     """
     Decorator to retry functions on connection errors.
-    
+
     Args:
         max_retries (int): Maximum number of retry attempts
         delay (int): Delay between retries in seconds
     """
+
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -24,18 +36,22 @@ def retry_on_connection_error(max_retries=3, delay=1):
             while retries < max_retries:
                 try:
                     return func(*args, **kwargs)
-                except (requests.exceptions.ConnectionError, 
-                       requests.exceptions.Timeout,
-                       requests.exceptions.RequestException) as e:
+                except exceptions as e:
                     retries += 1
                     if retries == max_retries:
                         logging.error(f"Failed after {max_retries} attempts: {str(e)}")
                         raise
-                    logging.warning(f"Connection error: {str(e)}. Retrying... ({retries}/{max_retries})")
-                    time.sleep(delay * retries)  # Exponential backoff
+                    wait_time = delay * (2 ** (retries - 1))  # exponential backoff
+                    logging.warning(
+                        f"Error: {str(e)}. Retrying in {wait_time}s... ({retries}/{max_retries})"
+                    )
+                    time.sleep(wait_time)
             return None
+
         return wrapper
+
     return decorator
+
 
 def is_binary_file(filepath):
     """
@@ -79,6 +95,7 @@ def fetch_file_content(file_path, repo_url, repo_dir, branch):
         "content": content,
         "url": f"{repo_url}/blob/{branch}/{relative_path}",
     }
+
 
 @retry_on_connection_error()
 def fetch_source_code_documents(repo, github_token, branch):
@@ -228,6 +245,7 @@ def fetch_existing_issues(repo, recent_period=None):
     logging.info(f"Fetched {len(documents)} issues from {repo.full_name}")
     cache_data(documents, cache_file)
     return documents
+
 
 @retry_on_connection_error()
 def fetch_existing_discussions(repo, github_token, recent_period=None):
@@ -552,6 +570,7 @@ def mark_discussion_as_processed(repo, discussion_number):
     logging.info(
         f"Discussion #{discussion_number} marked as processed for {repo.full_name}"
     )
+
 
 @retry_on_connection_error()
 def check_and_reply_new_discussions(

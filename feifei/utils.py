@@ -5,6 +5,8 @@ from .github_utils import check_and_reply_new_issues, check_and_reply_new_discus
 from langchain.chains.retrieval import create_retrieval_chain
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain_community.document_compressors import LLMLinguaCompressor
+import concurrent.futures
+import time
 
 
 def handle_cuda_oom_error():
@@ -105,3 +107,24 @@ def process_repository(
             signature_template,
             github_token,
         )
+
+
+def process_repositories_batch(repositories_config, batch_size=3, **kwargs):
+    """batch process repositories to avoid resource overuse"""
+    repos = list(repositories_config.items())
+    for i in range(0, len(repos), batch_size):
+        batch = repos[i : i + batch_size]
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            futures = {
+                executor.submit(
+                    process_repository, repo_full_name, repo_settings, **kwargs
+                ): repo_full_name
+                for repo_full_name, repo_settings in batch
+            }
+            for future in concurrent.futures.as_completed(futures):
+                repo_name = futures[future]
+                try:
+                    future.result()
+                except Exception as e:
+                    logging.error(f"Error processing {repo_name}: {e}")
+        time.sleep(5)  # pause between batches to avoid API limit

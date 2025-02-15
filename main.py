@@ -14,13 +14,22 @@ from feifei.utils import process_repository
 # Load environment variables from a .env file if present
 load_dotenv()
 
+
 # Configure logging
-logging_level = "INFO"
-logging.basicConfig(
-    level=getattr(logging, logging_level),
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[logging.FileHandler("feifei-bot.log"), logging.StreamHandler()],
-)
+def setup_logging(level="INFO"):
+    logging.basicConfig(
+        level=getattr(logging, level),
+        format="%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s",
+        handlers=[
+            logging.FileHandler("feifei-bot.log"),
+            logging.StreamHandler(),
+            logging.handlers.RotatingFileHandler(
+                "feifei-bot-rotating.log",
+                maxBytes=10 * 1024 * 1024,  # 10MB
+                backupCount=5,
+            ),
+        ],
+    )
 
 
 def main():

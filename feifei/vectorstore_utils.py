@@ -30,14 +30,20 @@ def rebuild_vectorstore(
         FAISS: The rebuilt vector store object.
     """
     documents = fetch_documents_from_repo(repo, github_token, branch, recent_period)
-    batch_size = 5  # Define batch size
-    document_size = len(documents)
-    init_size = batch_size if document_size > batch_size else document_size
-    vectorstore = FAISS.from_documents(documents[:init_size], embeddings)
-    for i in range(init_size, len(documents), batch_size):
-        end_size = i + batch_size if i + batch_size < document_size else document_size
-        batch_documents = documents[i:end_size]
-        vectorstore.add_documents(batch_documents)
+    batch_size = 100
+    for i in range(0, len(documents), batch_size):
+        batch = documents[i : i + batch_size]
+        if i == 0:
+            vectorstore = FAISS.from_documents(batch, embeddings)
+        else:
+            vectorstore.add_documents(batch)
+
+        # force garbage collection every 5 batches
+        if i % (batch_size * 5) == 0:
+            import gc
+
+            gc.collect()
+
     vectorstore.save_local(vectorstore_path)
 
     # Save the latest commit SHA to track changes
