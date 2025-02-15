@@ -16,20 +16,15 @@ load_dotenv()
 
 
 # Configure logging
-def setup_logging(level="INFO"):
-    logging.basicConfig(
-        level=getattr(logging, level),
-        format="%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s",
-        handlers=[
-            logging.FileHandler("feifei-bot.log"),
-            logging.StreamHandler(),
-            logging.handlers.RotatingFileHandler(
-                "feifei-bot-rotating.log",
-                maxBytes=10 * 1024 * 1024,  # 10MB
-                backupCount=5,
-            ),
-        ],
-    )
+log_level = "INFO"
+logging.basicConfig(
+    level=getattr(logging, log_level),
+    format="%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s",
+    handlers=[
+        logging.FileHandler("feifei-bot.log"),
+        logging.StreamHandler(),
+    ],
+)
 
 
 def main():
